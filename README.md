@@ -1,22 +1,80 @@
 # Quantitative Finance Pipeline
 
-A comprehensive data pipeline for quantitative finance analysis, featuring ETL processes, portfolio optimization, risk metrics, and machine learning components.
+A comprehensive data pipeline for quantitative finance analysis, featuring ETL processes, portfolio optimization, risk metrics, and machine learning components with a **complete Portfolio Management Dashboard**.
 
-## Features
+## 🚀 Quick Start with Docker (Recommended)
 
+The easiest way to run this application is using Docker, which ensures consistent deployment across any environment.
+
+### Prerequisites
+- [Docker](https://docs.docker.com/get-docker/) (v20.10+)
+- [Docker Compose](https://docs.docker.com/compose/install/) (v2.0+)
+
+### 1. Clone and Setup
+```bash
+git clone https://github.com/s207017/Financial-Analytics-Dashboard.git
+cd Financial-Analytics-Dashboard
+```
+
+### 2. Environment Configuration
+```bash
+# Copy the example environment file
+cp env.example .env
+
+# Edit .env with your API keys (optional for basic functionality)
+nano .env
+```
+
+**Required API Keys** (optional for basic portfolio management):
+- `ALPHA_VANTAGE_API_KEY` - Get free key at [Alpha Vantage](https://www.alphavantage.co/support/#api-key)
+- `QUANDL_API_KEY` - Get free key at [Quandl](https://www.quandl.com/account/api)
+- `FRED_API_KEY` - Get free key at [FRED](https://fred.stlouisfed.org/docs/api/api_key.html)
+
+### 3. Start the Application
+```bash
+# Start all services (PostgreSQL, Redis, Dashboard, Scheduler)
+docker-compose up -d
+
+# View logs
+docker-compose logs -f dashboard
+```
+
+### 4. Access the Dashboard
+- **Portfolio Management Dashboard**: http://localhost:8050
+- **Database**: localhost:5432 (postgres/quant_finance)
+- **Redis**: localhost:6379
+
+### 5. Initialize Sample Data (Optional)
+```bash
+# Create sample portfolios in the database
+docker-compose exec app python scripts/create_sample_portfolios.py
+
+# Setup database tables
+docker-compose exec app python scripts/setup_portfolio_tables.py
+```
+
+## 🎯 Features
+
+### Portfolio Management Dashboard
+- **Create & Edit Portfolios**: Build custom investment portfolios with multiple strategies
+- **Real-time Calculations**: Live portfolio value updates for custom stock allocations
+- **Multiple Strategies**: Equal Weight, Market Cap, Risk Parity, and Custom strategies
+- **Historical Analysis**: Actual return calculations based on real stock data
+- **Database Persistence**: All portfolios saved permanently in PostgreSQL
+
+### Core Pipeline Features
 - **Data Ingestion**: APIs for Alpha Vantage, Yahoo Finance, Quandl, and FRED
 - **ETL Pipeline**: Data transformation and loading into PostgreSQL
 - **Portfolio Optimization**: Modern Portfolio Theory implementation
 - **Risk Metrics**: Sharpe ratio, VaR, beta calculations
 - **Machine Learning**: Regression and clustering analysis
-- **Visualization**: Interactive Dash dashboard
 - **Cloud Deployment**: AWS integration with Docker and Kubernetes
 - **CI/CD**: GitHub Actions for automated testing and deployment
 
-## Project Structure
+## 🏗️ Project Structure
 
 ```
-quant-finance-pipeline/
+Financial-Analytics-Dashboard/
 ├── config/                 # Configuration files
 ├── data/                   # Data storage
 │   ├── raw/               # Raw data from APIs
@@ -27,49 +85,118 @@ quant-finance-pipeline/
 │   ├── etl/              # ETL pipeline components
 │   ├── analytics/        # Portfolio optimization and risk metrics
 │   ├── ml/               # Machine learning models
+│   ├── data_access/      # Database services (PortfolioManagementService)
 │   └── visualization/    # Dash app and reports
 ├── deployment/           # Docker and Kubernetes configs
+├── scripts/              # Setup and utility scripts
 ├── tests/               # Unit and integration tests
 └── notebooks/           # Jupyter notebooks for analysis
 ```
 
-## Setup
+## 🐳 Docker Services
 
-1. **Clone the repository**:
-   ```bash
-   git clone <repository-url>
-   cd quant-finance-pipeline
-   ```
+The application runs as a multi-service Docker Compose setup:
 
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+| Service | Port | Description |
+|---------|------|-------------|
+| `postgres` | 5432 | PostgreSQL database |
+| `redis` | 6379 | Redis cache |
+| `dashboard` | 8050 | Portfolio Management Dashboard |
+| `app` | 5000 | Main application API |
+| `scheduler` | - | Background data collection |
 
-3. **Set up environment variables**:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your API keys and database credentials
-   ```
+## 📊 Portfolio Management Usage
 
-4. **Set up PostgreSQL database**:
-   ```bash
-   # Create database
-   createdb quant_finance
-   ```
+### Creating Portfolios
+1. Navigate to **Portfolio Management** tab
+2. Enter portfolio name and description
+3. Select investment strategy:
+   - **Equal Weight**: Equal allocation across all assets
+   - **Market Cap**: Weighted by market capitalization
+   - **Risk Parity**: Risk-adjusted allocation
+   - **Custom**: Manual allocation with real-time value calculation
+4. Choose assets from the dropdown
+5. Click **Create Portfolio**
 
-5. **Run the pipeline**:
-   ```bash
-   python -m src.main
-   ```
+### Editing Portfolios
+1. Select portfolio from dropdown
+2. Click **Edit Portfolio**
+3. Modify name, description, or allocations
+4. Click **Update Portfolio**
 
-## API Keys Required
+### Custom Strategy
+- Enter individual stock amounts
+- Portfolio value updates automatically
+- Total value becomes read-only
+- Real-time validation and calculation
 
-- Alpha Vantage API key (free tier available)
-- Quandl API key (free tier available)
-- FRED API key (free registration required)
+## 🔧 Development Setup (Alternative)
 
-## Usage
+If you prefer to run without Docker:
+
+### Prerequisites
+- Python 3.8+
+- PostgreSQL 12+
+- Redis 6+
+
+### Setup
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Setup database
+createdb quant_finance
+python scripts/setup_portfolio_tables.py
+
+# Run the dashboard
+python -m src.visualization.dash_app.simple_app
+```
+
+## 🚀 Deployment Options
+
+### Docker Compose (Recommended)
+```bash
+# Production deployment
+docker-compose -f docker-compose.yml up -d
+
+# With monitoring stack
+docker-compose -f docker-compose.yml -f monitoring/docker-compose.monitoring.yml up -d
+```
+
+### Kubernetes
+```bash
+# Deploy to Kubernetes
+kubectl apply -f deployment/kubernetes/
+```
+
+### AWS Lambda
+```bash
+# Deploy serverless functions
+python scripts/deploy_lambda.py
+```
+
+## 📈 API Usage Examples
+
+### Portfolio Management
+```python
+from src.data_access.portfolio_management_service import PortfolioManagementService
+
+service = PortfolioManagementService()
+
+# Create portfolio
+portfolio = service.create_portfolio(
+    name="Tech Growth",
+    symbols=["AAPL", "GOOGL", "MSFT"],
+    weights=[0.4, 0.3, 0.3],
+    strategy="Custom"
+)
+
+# Calculate analytics
+analytics = service.calculate_portfolio_analytics(
+    symbols=["AAPL", "GOOGL", "MSFT"],
+    weights=[0.4, 0.3, 0.3]
+)
+```
 
 ### Data Ingestion
 ```python
@@ -87,35 +214,97 @@ optimizer = PortfolioOptimizer()
 weights = optimizer.optimize_portfolio(returns_data)
 ```
 
-### Risk Metrics
-```python
-from src.analytics.risk_metrics import RiskCalculator
+## 🔍 Monitoring
 
-calculator = RiskCalculator()
-sharpe_ratio = calculator.calculate_sharpe_ratio(returns, risk_free_rate)
-```
+Access monitoring dashboards:
+- **Grafana**: http://localhost:3000 (admin/admin)
+- **Prometheus**: http://localhost:9090
 
-## Deployment
+## 🧪 Testing
 
-### Docker
 ```bash
-docker build -t quant-finance-pipeline .
-docker run -p 5000:5000 quant-finance-pipeline
+# Run tests
+docker-compose exec app python -m pytest tests/
+
+# Run specific test
+docker-compose exec app python -m pytest tests/unit/test_portfolio_service.py
 ```
 
-### Kubernetes
+## 🛠️ Troubleshooting
+
+### Common Issues
+
+**Port 8050 already in use:**
 ```bash
-kubectl apply -f deployment/kubernetes/
+# Find and kill process
+lsof -ti:8050 | xargs kill -9
 ```
 
-## Contributing
+**Database connection issues:**
+```bash
+# Check PostgreSQL status
+docker-compose ps postgres
+docker-compose logs postgres
+```
+
+**Missing dependencies:**
+```bash
+# Rebuild containers
+docker-compose down
+docker-compose build --no-cache
+docker-compose up -d
+```
+
+### Reset Everything
+```bash
+# Complete reset
+docker-compose down -v
+docker system prune -f
+docker-compose up -d
+```
+
+## 📝 Environment Variables
+
+Key environment variables in `.env`:
+
+```bash
+# Database
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=quant_finance
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=your_password
+
+# API Keys
+ALPHA_VANTAGE_API_KEY=your_key
+QUANDL_API_KEY=your_key
+FRED_API_KEY=your_key
+
+# Application
+FLASK_ENV=development
+DEBUG=True
+```
+
+## 🤝 Contributing
 
 1. Fork the repository
-2. Create a feature branch
+2. Create a feature branch: `git checkout -b feature-name`
 3. Make your changes
-4. Add tests
-5. Submit a pull request
+4. Add tests for new functionality
+5. Commit with conventional commits: `git commit -m "feat: add new feature"`
+6. Push to your fork: `git push origin feature-name`
+7. Submit a pull request
 
-## License
+## 📄 License
 
-MIT License
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## 🆘 Support
+
+- **Issues**: [GitHub Issues](https://github.com/s207017/Financial-Analytics-Dashboard/issues)
+- **Documentation**: Check the `/docs` folder for detailed guides
+- **Docker Issues**: Ensure Docker and Docker Compose are properly installed
+
+---
+
+**Ready to start?** Run `docker-compose up -d` and visit http://localhost:8050! 🚀

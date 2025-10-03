@@ -15,6 +15,8 @@ RUN apt-get update && apt-get install -y \
     g++ \
     libpq-dev \
     curl \
+    git \
+    cmake \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
