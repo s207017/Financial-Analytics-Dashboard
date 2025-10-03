@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: quant-finance-ingress
+  namespace: quant-finance
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+  - host: quant-finance.local
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: quant-finance-app-service
+            port:
+              number: 8050
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: quant-finance-dashboard-service
+            port:
+              number: 8050

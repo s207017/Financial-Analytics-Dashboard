@@ -1,0 +1,3 @@
+"""
+Quandl data collector.
+"""

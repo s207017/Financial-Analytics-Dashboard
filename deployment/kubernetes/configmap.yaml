@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: quant-finance-config
+  namespace: quant-finance
+data:
+  DATABASE_URL: "postgresql://postgres:password@postgres-service:5432/quant_finance"
+  REDIS_URL: "redis://redis-service:6379"
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"

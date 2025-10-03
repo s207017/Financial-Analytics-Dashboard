@@ -1,0 +1,3 @@
+"""
+Yahoo Finance data collector.
+"""

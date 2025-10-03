@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15
+    container_name: quant-finance-db
+    environment:
+      POSTGRES_DB: quant_finance
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deployment/docker/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: quant-finance-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Main application
+  app:
+    build: .
+    container_name: quant-finance-app
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/quant_finance
+      - REDIS_URL=redis://redis:6379
+      - ENVIRONMENT=production
+    ports:
+      - "8050:8050"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8050/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Dash visualization app
+  dashboard:
+    build: .
+    container_name: quant-finance-dashboard
+    command: ["python", "-m", "src.visualization.dash_app.app"]
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/quant_finance
+      - ENVIRONMENT=production
+    ports:
+      - "8051:8050"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Data collection scheduler
+  scheduler:
+    build: .
+    container_name: quant-finance-scheduler
+    command: ["python", "-m", "src.scheduler"]
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/quant_finance
+      - REDIS_URL=redis://redis:6379
+      - ENVIRONMENT=production
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
