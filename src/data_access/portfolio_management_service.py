@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, text
 import logging
 from datetime import datetime, timedelta
 import json
+import redis
 from config.config import DATABASE_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,102 @@ class PortfolioManagementService:
                 f"postgresql://{DATABASE_CONFIG['user']}:{DATABASE_CONFIG['password']}@"
                 f"{DATABASE_CONFIG['host']}:{DATABASE_CONFIG['port']}/{DATABASE_CONFIG['name']}"
             )
+        
+        # Redis connection for caching
+        try:
+            self.redis_client = redis.Redis(
+                host=os.getenv('REDIS_HOST', 'localhost'),
+                port=int(os.getenv('REDIS_PORT', 6379)),
+                db=int(os.getenv('REDIS_DB', 0)),
+                decode_responses=True
+            )
+            # Test Redis connection
+            self.redis_client.ping()
+            self.redis_available = True
+            logger.info("Redis connection established for portfolio analytics caching")
+        except Exception as e:
+            logger.warning(f"Redis not available for caching: {e}")
+            self.redis_available = False
+            self.redis_client = None
+    
+    def _generate_cache_key(self, symbols: List[str], weights: List[float], 
+                           start_date: str = None, end_date: str = None) -> str:
+        """Generate a unique cache key for portfolio analytics."""
+        # Create a hash of the input parameters
+        import hashlib
+        key_data = {
+            'symbols': sorted(symbols),  # Sort for consistency
+            'weights': weights,
+            'start_date': start_date,
+            'end_date': end_date
+        }
+        key_string = json.dumps(key_data, sort_keys=True)
+        key_hash = hashlib.md5(key_string.encode()).hexdigest()
+        return f"portfolio_analytics:{key_hash}"
+    
+    def _get_cached_analytics(self, cache_key: str) -> Optional[Dict[str, Any]]:
+        """Get cached portfolio analytics from Redis."""
+        if not self.redis_available:
+            return None
+        
+        try:
+            cached_data = self.redis_client.get(cache_key)
+            if cached_data:
+                logger.info(f"Cache hit for portfolio analytics: {cache_key}")
+                return json.loads(cached_data)
+        except Exception as e:
+            logger.error(f"Error getting cached analytics: {e}")
+        
+        return None
+    
+    def _cache_analytics(self, cache_key: str, analytics: Dict[str, Any], ttl: int = 300) -> bool:
+        """Cache portfolio analytics in Redis."""
+        if not self.redis_available:
+            return False
+        
+        try:
+            # Cache for 5 minutes by default (300 seconds)
+            self.redis_client.setex(cache_key, ttl, json.dumps(analytics))
+            logger.info(f"Cached portfolio analytics: {cache_key} (TTL: {ttl}s)")
+            return True
+        except Exception as e:
+            logger.error(f"Error caching analytics: {e}")
+            return False
+    
+    def invalidate_portfolio_cache(self, symbols: List[str] = None) -> bool:
+        """Invalidate portfolio analytics cache for specific symbols or all cache."""
+        if not self.redis_available:
+            return False
+        
+        try:
+            if symbols:
+                # Invalidate cache for specific symbols
+                pattern = f"portfolio_analytics:*"
+                keys = self.redis_client.keys(pattern)
+                invalidated_count = 0
+                
+                for key in keys:
+                    # Check if this cache entry contains any of the specified symbols
+                    cached_data = self.redis_client.get(key)
+                    if cached_data:
+                        # We can't easily check the symbols in the cached data without parsing
+                        # So we'll invalidate all cache entries for now
+                        self.redis_client.delete(key)
+                        invalidated_count += 1
+                
+                logger.info(f"Invalidated {invalidated_count} portfolio analytics cache entries")
+            else:
+                # Invalidate all portfolio analytics cache
+                pattern = f"portfolio_analytics:*"
+                keys = self.redis_client.keys(pattern)
+                if keys:
+                    self.redis_client.delete(*keys)
+                    logger.info(f"Invalidated all {len(keys)} portfolio analytics cache entries")
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error invalidating portfolio cache: {e}")
+            return False
     
     def create_portfolio(self, name: str, description: str, symbols: List[str], 
                         weights: List[float], strategy: str = "Custom") -> Dict[str, Any]:
@@ -231,8 +328,66 @@ class PortfolioManagementService:
     
     def calculate_portfolio_analytics(self, symbols: List[str], weights: List[float], 
                                     start_date: str = None, end_date: str = None) -> Dict[str, Any]:
-        """Calculate comprehensive portfolio analytics"""
+        """Calculate comprehensive portfolio analytics with Redis caching"""
         try:
+            # Generate cache key
+            cache_key = self._generate_cache_key(symbols, weights, start_date, end_date)
+            
+            # Try to get cached result first
+            cached_analytics = self._get_cached_analytics(cache_key)
+            if cached_analytics:
+                # For cached results, we need to recalculate the returns series
+                # since it's not stored in cache (not JSON serializable)
+                try:
+                    # Get the stock data again to calculate returns
+                    if STOCK_DATA_AVAILABLE:
+                        stock_service = get_stock_data_service()
+                        
+                        # Collect data for all symbols
+                        all_data = []
+                        available_symbols = []
+                        
+                        for symbol in symbols:
+                            df = stock_service.get_stock_data(symbol, start_date, end_date)
+                            if df is not None and not df.empty:
+                                df['symbol'] = symbol
+                                all_data.append(df.reset_index())
+                                available_symbols.append(symbol)
+                        
+                        if all_data:
+                            price_data = pd.concat(all_data, ignore_index=True)
+                            price_data = price_data[['symbol', 'date', 'close']]
+                            
+                            # Pivot data to get prices by date
+                            price_pivot = price_data.pivot(index='date', columns='symbol', values='close')
+                            price_pivot = price_pivot.ffill().bfill()
+                            
+                            # Calculate returns
+                            returns = price_pivot.pct_change().dropna()
+                            
+                            # Create weights array that matches available symbols
+                            weights_dict = dict(zip(symbols, weights))
+                            available_weights = [weights_dict.get(symbol, 0.0) for symbol in available_symbols]
+                            weights_array = np.array(available_weights)
+                            
+                            # Normalize weights to sum to 1
+                            if weights_array.sum() > 0:
+                                weights_array = weights_array / weights_array.sum()
+                            else:
+                                weights_array = np.array([1.0 / len(available_symbols)] * len(available_symbols))
+                            
+                            # Calculate portfolio returns
+                            portfolio_returns = (returns * weights_array).sum(axis=1)
+                            
+                            # Add the returns series to cached analytics
+                            cached_analytics['returns'] = portfolio_returns
+                            
+                except Exception as e:
+                    logger.warning(f"Could not recalculate returns for cached analytics: {e}")
+                
+                return cached_analytics
+            
+            logger.info(f"Cache miss for portfolio analytics: {cache_key}, calculating...")
             # Get stock price data
             if not start_date:
                 start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
@@ -278,7 +433,7 @@ class PortfolioManagementService:
             
             # Pivot data to get prices by date
             price_pivot = price_data.pivot(index='date', columns='symbol', values='close')
-            price_pivot = price_pivot.fillna(method='ffill').fillna(method='bfill')
+            price_pivot = price_pivot.ffill().bfill()
             
             # Check which symbols have data
             available_symbols = list(price_pivot.columns)
@@ -314,6 +469,12 @@ class PortfolioManagementService:
             analytics.update(self._calculate_performance_metrics(portfolio_returns))
             analytics.update(self._calculate_drawdown_metrics(portfolio_returns))
             analytics.update(self._calculate_volatility_metrics(portfolio_returns, returns, weights_array))
+            
+            # Cache the results (without the returns series since it's not JSON serializable)
+            self._cache_analytics(cache_key, analytics)
+            
+            # Add the returns series for chart generation (after caching)
+            analytics['returns'] = portfolio_returns
             
             return analytics
             

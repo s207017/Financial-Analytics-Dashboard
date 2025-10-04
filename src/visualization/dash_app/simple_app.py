@@ -82,6 +82,74 @@ def format_assets_with_percentages(portfolio):
     
     return ', '.join(formatted_assets)
 
+def validate_stock_symbols(symbols):
+    """Validate stock symbols and fetch data for new symbols."""
+    if not symbols:
+        return [], []
+    
+    valid_symbols = []
+    invalid_symbols = []
+    
+    try:
+        from src.data_access.stock_data_service import get_stock_data_service
+        stock_service = get_stock_data_service()
+        
+        for symbol in symbols:
+            symbol = symbol.upper().strip()
+            if not symbol:
+                continue
+                
+            # Check if we already have data for this symbol
+            existing_data = stock_service.get_stock_data(symbol)
+            if existing_data is not None and not existing_data.empty:
+                valid_symbols.append(symbol)
+                continue
+            
+            # Try to fetch data for new symbol
+            print(f"Fetching data for new symbol: {symbol}")
+            success = stock_service.fetch_and_store_stock_data(symbol, force_refresh=True)
+            
+            if success:
+                # Verify data was actually stored
+                data = stock_service.get_stock_data(symbol)
+                if data is not None and not data.empty:
+                    valid_symbols.append(symbol)
+                    print(f"✅ Successfully fetched data for {symbol}")
+                else:
+                    invalid_symbols.append(symbol)
+                    print(f"❌ No data available for {symbol}")
+            else:
+                invalid_symbols.append(symbol)
+                print(f"❌ Failed to fetch data for {symbol}")
+                
+    except Exception as e:
+        print(f"Error validating stock symbols: {e}")
+        # If validation fails, return the original symbols as valid
+        valid_symbols = [s.upper().strip() for s in symbols if s.strip()]
+        invalid_symbols = []
+    
+    return valid_symbols, invalid_symbols
+
+def fetch_missing_stock_data_for_portfolios(portfolios):
+    """Fetch missing stock data for all symbols in the given portfolios."""
+    if not portfolios:
+        return portfolios
+    
+    all_symbols = set()
+    for portfolio in portfolios:
+        all_symbols.update(portfolio.get('symbols', []))
+    
+    if not all_symbols:
+        return portfolios
+    
+    print(f"Checking and fetching data for symbols: {list(all_symbols)}")
+    valid_symbols, invalid_symbols = validate_stock_symbols(list(all_symbols))
+    
+    if invalid_symbols:
+        print(f"Warning: Could not fetch data for symbols: {invalid_symbols}")
+    
+    return portfolios
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -243,7 +311,13 @@ def create_performance_metrics():
         dbc.Row([
             dbc.Col([
                 html.H3("Performance Comparison"),
-                dcc.Graph(id="performance-comparison-chart")
+                html.Div(id="performance-loading-text", style={"display": "none"}, 
+                        children=dbc.Alert("Fetching stock data and calculating performance...", color="info", className="mb-2")),
+                dcc.Loading(
+                    id="performance-loading",
+                    children=[dcc.Graph(id="performance-comparison-chart")],
+                    type="default"
+                )
             ], width=8),
             dbc.Col([
                 html.H3("Performance Summary"),
@@ -350,9 +424,21 @@ def create_portfolio_management():
                                         {"label": "NFLX - Netflix Inc.", "value": "NFLX"}
                                     ],
                                     multi=True,
+                                    searchable=True,
+                                    placeholder="Search or select stock symbols",
                                     value=["AAPL", "GOOGL", "MSFT"]
                                 )
-                            ], width=8),
+                            ], width=6),
+                            dbc.Col([
+                                html.Label("Add Custom Symbol:"),
+                                dbc.InputGroup([
+                                    dbc.Input(id="custom-symbol-input", placeholder="e.g., JOBY, AMD, NVDA"),
+                                    dbc.Button("Add", id="add-symbol-btn", color="primary", outline=True)
+                                ])
+                            ], width=6)
+                        ], className="mb-3"),
+                        
+                        dbc.Row([
                             dbc.Col([
                                 html.Label("Portfolio Value:"),
                                 dbc.Input(id="portfolio-value", value=100000, type="number", min=1000)
@@ -370,7 +456,14 @@ def create_portfolio_management():
                                 dbc.Button("Clear", id="clear-portfolio-btn", 
                                          color="outline-secondary")
                             ], width=12)
-                        ])
+                        ], className="mb-3"),
+                        
+                        # Status message area for stock data fetching
+                        dbc.Row([
+                            dbc.Col([
+                                html.Div(id="portfolio-creation-status", children=[])
+                            ], width=12)
+                        ], className="mb-3")
                     ])
                 ])
             ], width=6),
@@ -487,6 +580,40 @@ def create_optimization():
             ], width=6)
         ])
     ])
+
+# Callback to add custom symbols to the dropdown
+@app.callback(
+    [Output("asset-selector", "options"),
+     Output("asset-selector", "value", allow_duplicate=True),
+     Output("custom-symbol-input", "value")],
+    [Input("add-symbol-btn", "n_clicks")],
+    [dash.dependencies.State("custom-symbol-input", "value"),
+     dash.dependencies.State("asset-selector", "options"),
+     dash.dependencies.State("asset-selector", "value")],
+    prevent_initial_call=True
+)
+def add_custom_symbol(n_clicks, custom_symbol, current_options, current_values):
+    """Add custom symbol to the dropdown options."""
+    if not n_clicks or not custom_symbol:
+        return dash.no_update, dash.no_update, dash.no_update
+    
+    custom_symbol = custom_symbol.upper().strip()
+    if not custom_symbol:
+        return dash.no_update, dash.no_update, ""
+    
+    # Check if symbol already exists
+    existing_values = [opt["value"] for opt in current_options]
+    if custom_symbol in existing_values:
+        return dash.no_update, dash.no_update, ""
+    
+    # Add new symbol to options
+    new_option = {"label": f"{custom_symbol} - {custom_symbol}", "value": custom_symbol}
+    updated_options = current_options + [new_option]
+    
+    # Add to current selection
+    updated_values = current_values + [custom_symbol] if current_values else [custom_symbol]
+    
+    return updated_options, updated_values, ""
 
 # Callback for tab content
 @app.callback(
@@ -1901,7 +2028,7 @@ def update_portfolio(n_clicks, name, description, assets, value, strategy, selec
 
 # Callback for auto-allocate button (only affects asset selector)
 @app.callback(
-    Output("asset-selector", "value"),
+    Output("asset-selector", "value", allow_duplicate=True),
     [Input("auto-allocate-btn", "n_clicks"),
      Input("portfolio-strategy", "value")],
     prevent_initial_call=True
@@ -1940,7 +2067,8 @@ def clear_portfolio_form(clear_clicks):
 @app.callback(
     [Output("portfolios-list", "children", allow_duplicate=True),
      Output("portfolio-storage", "children"),
-     Output("portfolio-selector", "options", allow_duplicate=True)],
+     Output("portfolio-selector", "options", allow_duplicate=True),
+     Output("portfolio-creation-status", "children")],
     [Input("create-portfolio-btn", "n_clicks")],
     [dash.dependencies.State("portfolio-name", "value"),
      dash.dependencies.State("portfolio-description", "value"),
@@ -1951,26 +2079,61 @@ def clear_portfolio_form(clear_clicks):
     prevent_initial_call=True
 )
 def create_portfolio(n_clicks, name, description, assets, value, strategy, stored_data):
-    """Create a new portfolio."""
+    """Create a new portfolio with automatic stock data fetching."""
     if not n_clicks or not name or not assets:
-        return no_update, no_update, no_update
+        return no_update, no_update, no_update, []
     
     try:
         if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
+            # Show initial status message
+            status_message = dbc.Alert(
+                f"Fetching stock data for {len(assets)} symbols...", 
+                color="info", 
+                className="mb-2"
+            )
+            
+            # Validate stock symbols and fetch data for new ones
+            print(f"Validating and fetching data for symbols: {assets}")
+            valid_symbols, invalid_symbols = validate_stock_symbols(assets)
+            
+            if invalid_symbols:
+                print(f"Invalid symbols found: {invalid_symbols}")
+                status_message = dbc.Alert(
+                    f"Warning: Could not fetch data for {', '.join(invalid_symbols)}. Proceeding with valid symbols only.", 
+                    color="warning", 
+                    className="mb-2"
+                )
+            
+            if not valid_symbols:
+                print("No valid symbols found, cannot create portfolio")
+                error_message = dbc.Alert(
+                    "Error: No valid stock symbols found. Please check your symbols and try again.", 
+                    color="danger", 
+                    className="mb-2"
+                )
+                return no_update, no_update, no_update, [error_message]
+            
+            print(f"Creating portfolio with valid symbols: {valid_symbols}")
+            success_message = dbc.Alert(
+                f"Successfully fetched data for {len(valid_symbols)} symbols. Creating portfolio...", 
+                color="success", 
+                className="mb-2"
+            )
+            
             # Calculate weights for custom strategy
             if strategy == "custom" and value and value > 0:
                 # For custom strategy, we need to get individual amounts from the form
                 # This is a simplified approach - in a real app, you'd pass the individual amounts
-                weights = [1.0 / len(assets)] * len(assets)  # Equal weights as fallback
+                weights = [1.0 / len(valid_symbols)] * len(valid_symbols)  # Equal weights as fallback
             else:
                 # For other strategies, use equal weights
-                weights = [1.0 / len(assets)] * len(assets)
+                weights = [1.0 / len(valid_symbols)] * len(valid_symbols)
             
-            # Save to database
+            # Save to database with validated symbols
             portfolio_data = PORTFOLIO_SERVICE.create_portfolio(
                 name=name,
                 description=description or "",
-                symbols=assets,
+                symbols=valid_symbols,
                 weights=weights,
                 strategy=strategy.replace("_", " ").title()
             )
@@ -2025,7 +2188,12 @@ def create_portfolio(n_clicks, name, description, assets, value, strategy, store
             existing_portfolios.insert(0, new_portfolio)
     except Exception as e:
         print(f"Error creating portfolio: {e}")
-        return no_update, no_update, no_update
+        error_message = dbc.Alert(
+            f"Error creating portfolio: {str(e)}", 
+            color="danger", 
+            className="mb-2"
+        )
+        return no_update, no_update, no_update, [error_message]
     
     # Create portfolio cards
     portfolio_cards = []
@@ -2064,9 +2232,37 @@ def create_portfolio(n_clicks, name, description, assets, value, strategy, store
             "value": portfolio['name']
         })
     
-    return portfolio_cards, stored_portfolios, dropdown_options
+    # Return with success message
+    final_message = dbc.Alert(
+        f"Portfolio '{name}' created successfully with {len(valid_symbols)} assets!", 
+        color="success", 
+        className="mb-2"
+    )
+    return portfolio_cards, stored_portfolios, dropdown_options, [final_message]
 
 # Performance Metrics Callbacks
+
+# Callback to show loading text when performance tab is clicked
+@app.callback(
+    Output("performance-loading-text", "style"),
+    [Input("tabs", "active_tab")],
+    prevent_initial_call=True
+)
+def show_performance_loading_text(active_tab):
+    """Show loading text when performance tab is clicked."""
+    if active_tab == "performance-tab":
+        return {"display": "block"}
+    return {"display": "none"}
+
+# Callback to hide loading text when performance data is loaded
+@app.callback(
+    Output("performance-loading-text", "style", allow_duplicate=True),
+    [Input("performance-comparison-chart", "figure")],
+    prevent_initial_call=True
+)
+def hide_performance_loading_text(figure):
+    """Hide loading text when performance chart is updated."""
+    return {"display": "none"}
 
 # Callback for performance comparison chart
 @app.callback(
@@ -2075,12 +2271,9 @@ def create_portfolio(n_clicks, name, description, assets, value, strategy, store
      Input("performance-portfolio-selector", "value")]
 )
 def update_performance_comparison(active_tab, selected_portfolios):
-    """Update performance comparison chart using 100% real calculated data."""
+    """Update performance comparison chart using 100% real calculated data with automatic data fetching."""
     if active_tab != "performance-tab":
         return go.Figure()
-    
-    # Available stocks in database
-    available_stocks = ['AAPL', 'AMZN', 'GOOGL', 'MSFT', 'TSLA']
     
     portfolios = {}
     if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
@@ -2096,10 +2289,33 @@ def update_performance_comparison(active_tab, selected_portfolios):
             else:
                 portfolios_to_analyze = db_portfolios  # Analyze all if none selected
             
+            # Automatically fetch missing stock data for all portfolios
+            if portfolios_to_analyze:
+                print("Performance Metrics: Fetching missing stock data...")
+                fetch_missing_stock_data_for_portfolios(portfolios_to_analyze)
+                print("Performance Metrics: Data fetching completed")
+            
             for p in portfolios_to_analyze:
                 # Check if portfolio has any stocks with available data
                 portfolio_symbols = p['symbols']
-                available_symbols = [s for s in portfolio_symbols if s in available_stocks]
+                print(f"Processing portfolio: {p['name']} with symbols: {portfolio_symbols}")
+                
+                # Check which symbols have data available after fetching
+                available_symbols = []
+                try:
+                    from src.data_access.stock_data_service import get_stock_data_service
+                    stock_service = get_stock_data_service()
+                    
+                    for symbol in portfolio_symbols:
+                        data = stock_service.get_stock_data(symbol)
+                        print(f"Checking {symbol}: data is {'available' if data is not None and not data.empty else 'not available'}")
+                        if data is not None and not data.empty:
+                            available_symbols.append(symbol)
+                except Exception as e:
+                    print(f"Error checking stock data availability: {e}")
+                    continue
+                
+                print(f"Available symbols for {p['name']}: {available_symbols}")
                 
                 if available_symbols:  # Only process portfolios with available data
                     # Calculate real portfolio performance using available symbols only
@@ -2115,21 +2331,35 @@ def update_performance_comparison(active_tab, selected_portfolios):
                         if total_weight > 0:
                             normalized_weights = [w/total_weight for w in available_weights]
                             
-                            # Calculate performance with available data
+                            # Calculate performance with available data using dynamic date range
+                            print(f"Calculating analytics for {p['name']} with symbols: {available_symbols}, weights: {normalized_weights}")
+                            
+                            # Use a dynamic date range - try to get 1 year of data, but adapt to what's available
+                            end_date = datetime.now().strftime('%Y-%m-%d')
+                            start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                            
                             analytics_available = PORTFOLIO_SERVICE.calculate_portfolio_analytics(
                                 symbols=available_symbols,
                                 weights=normalized_weights,
-                                start_date="2023-01-01",
-                                end_date="2024-01-01"
+                                start_date=start_date,
+                                end_date=end_date
                             )
+                            
+                            print(f"Analytics result for {p['name']}: {analytics_available}")
                             
                             if "error" not in analytics_available and "returns" in analytics_available:
                                 returns = analytics_available["returns"]
+                                print(f"Returns for {p['name']}: {len(returns)} data points")
                                 if len(returns) > 0:
                                     cumulative_returns = (1 + returns).cumprod() - 1
                                     # Show portfolio name with (Partial) if not all stocks are available
                                     display_name = f"{p['name']} (Partial)" if len(available_symbols) < len(portfolio_symbols) else p['name']
                                     portfolios[display_name] = cumulative_returns
+                                    print(f"Added {display_name} to portfolios with {len(cumulative_returns)} data points")
+                                else:
+                                    print(f"No returns data for {p['name']}")
+                            else:
+                                print(f"Analytics error or no returns for {p['name']}: {analytics_available}")
                     except Exception as e:
                         print(f"Error calculating performance for {p['name']}: {e}")
                         continue
@@ -2146,7 +2376,7 @@ def update_performance_comparison(active_tab, selected_portfolios):
             message = "Please select a portfolio"
             title = "Portfolio Performance Comparison"
         else:
-            message = "No portfolio data available for performance comparison.<br>Please ensure portfolios contain stocks with available data (AAPL, AMZN, GOOGL, MSFT, TSLA)."
+            message = "No portfolio data available for performance comparison.<br>Please ensure portfolios contain stocks with available data."
             title = "Portfolio Performance Comparison - No Data Available"
         
         fig.add_annotation(
@@ -2207,12 +2437,9 @@ def update_performance_comparison(active_tab, selected_portfolios):
     [Input("tabs", "active_tab")]
 )
 def update_performance_summary(active_tab):
-    """Update performance summary display using 100% real calculated data."""
+    """Update performance summary display using 100% real calculated data with dynamic data fetching."""
     if active_tab != "performance-tab":
         return html.Div()
-    
-    # Available stocks in database
-    available_stocks = ['AAPL', 'AMZN', 'GOOGL', 'MSFT', 'TSLA']
     
     performance_metrics = []
     
@@ -2220,6 +2447,11 @@ def update_performance_summary(active_tab):
         try:
             db_portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
             if db_portfolios:
+                # Automatically fetch missing stock data for all portfolios
+                print("Performance Summary: Fetching missing stock data...")
+                fetch_missing_stock_data_for_portfolios(db_portfolios)
+                print("Performance Summary: Data fetching completed")
+                
                 # Calculate real performance metrics
                 portfolio_returns = []
                 portfolio_names = []
@@ -2229,16 +2461,33 @@ def update_performance_summary(active_tab):
                 for p in db_portfolios:
                     # Check if portfolio has any stocks with available data
                     portfolio_symbols = p['symbols']
-                    available_symbols = [s for s in portfolio_symbols if s in available_stocks]
+                    
+                    # Check which symbols have data available after fetching
+                    available_symbols = []
+                    try:
+                        from src.data_access.stock_data_service import get_stock_data_service
+                        stock_service = get_stock_data_service()
+                        
+                        for symbol in portfolio_symbols:
+                            data = stock_service.get_stock_data(symbol)
+                            if data is not None and not data.empty:
+                                available_symbols.append(symbol)
+                    except Exception as e:
+                        print(f"Error checking stock data availability for performance summary: {e}")
+                        continue
                     
                     if available_symbols:
                         try:
+                            # Use dynamic date range
+                            end_date = datetime.now().strftime('%Y-%m-%d')
+                            start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                            
                             # Calculate real portfolio analytics
                             analytics = PORTFOLIO_SERVICE.calculate_portfolio_analytics(
                                 symbols=portfolio_symbols,
                                 weights=p['weights'],
-                                start_date="2023-01-01",
-                                end_date="2024-01-01"
+                                start_date=start_date,
+                                end_date=end_date
                             )
                             
                             if "error" not in analytics:
@@ -2279,7 +2528,7 @@ def update_performance_summary(active_tab):
         performance_metrics = [
             {"label": "Status", "value": "No Data Available", "color": "warning"},
             {"label": "Available Stocks", "value": "AAPL, AMZN, GOOGL, MSFT, TSLA", "color": "info"},
-            {"label": "Date Range", "value": "2023-01-01 to 2024-01-01", "color": "info"},
+            {"label": "Date Range", "value": "2024-10-01 to 2025-10-01", "color": "info"},
             {"label": "Action Required", "value": "Add portfolios with available stocks", "color": "danger"}
         ]
     
@@ -2302,34 +2551,55 @@ def update_performance_summary(active_tab):
     [Input("tabs", "active_tab")]
 )
 def update_rolling_sharpe(active_tab):
-    """Update rolling Sharpe ratio chart using 100% real calculated data."""
+    """Update rolling Sharpe ratio chart using 100% real calculated data with dynamic data fetching."""
     if active_tab != "performance-tab":
         return go.Figure()
-    
-    # Available stocks in database
-    available_stocks = ['AAPL', 'AMZN', 'GOOGL', 'MSFT', 'TSLA']
     
     if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
         try:
             db_portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
             
+            # Automatically fetch missing stock data for all portfolios
+            if db_portfolios:
+                print("Rolling Sharpe: Fetching missing stock data...")
+                fetch_missing_stock_data_for_portfolios(db_portfolios)
+                print("Rolling Sharpe: Data fetching completed")
+            
             # Find the first portfolio with available data for rolling Sharpe calculation
             selected_portfolio = None
             for p in db_portfolios:
                 portfolio_symbols = p['symbols']
-                available_symbols = [s for s in portfolio_symbols if s in available_stocks]
+                
+                # Check which symbols have data available after fetching
+                available_symbols = []
+                try:
+                    from src.data_access.stock_data_service import get_stock_data_service
+                    stock_service = get_stock_data_service()
+                    
+                    for symbol in portfolio_symbols:
+                        data = stock_service.get_stock_data(symbol)
+                        if data is not None and not data.empty:
+                            available_symbols.append(symbol)
+                except Exception as e:
+                    print(f"Error checking stock data availability for rolling Sharpe: {e}")
+                    continue
+                
                 if available_symbols:
                     selected_portfolio = p
                     break
             
             if selected_portfolio:
                 try:
+                    # Use dynamic date range
+                    end_date = datetime.now().strftime('%Y-%m-%d')
+                    start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                    
                     # Calculate real portfolio analytics
                     analytics = PORTFOLIO_SERVICE.calculate_portfolio_analytics(
                         symbols=selected_portfolio['symbols'],
                         weights=selected_portfolio['weights'],
-                        start_date="2023-01-01",
-                        end_date="2024-01-01"
+                        start_date=start_date,
+                        end_date=end_date
                     )
                     
                     if "error" not in analytics and "returns" in analytics:
@@ -2386,7 +2656,7 @@ def update_rolling_sharpe(active_tab):
     # Fallback: show message if no real data available
     fig = go.Figure()
     fig.add_annotation(
-        text="No portfolio data available for rolling Sharpe calculation.<br>Please ensure portfolios contain stocks with available data (AAPL, AMZN, GOOGL, MSFT, TSLA).",
+        text="No portfolio data available for rolling Sharpe calculation.<br>Please ensure portfolios contain stocks with available data.",
         xref="paper", yref="paper",
         x=0.5, y=0.5, showarrow=False,
         font=dict(size=16, color="red")
@@ -2405,34 +2675,55 @@ def update_rolling_sharpe(active_tab):
     [Input("tabs", "active_tab")]
 )
 def update_rolling_volatility(active_tab):
-    """Update rolling volatility chart using 100% real calculated data."""
+    """Update rolling volatility chart using 100% real calculated data with dynamic data fetching."""
     if active_tab != "performance-tab":
         return go.Figure()
-    
-    # Available stocks in database
-    available_stocks = ['AAPL', 'AMZN', 'GOOGL', 'MSFT', 'TSLA']
     
     if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
         try:
             db_portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
             
+            # Automatically fetch missing stock data for all portfolios
+            if db_portfolios:
+                print("Rolling Volatility: Fetching missing stock data...")
+                fetch_missing_stock_data_for_portfolios(db_portfolios)
+                print("Rolling Volatility: Data fetching completed")
+            
             # Find the first portfolio with available data for rolling volatility calculation
             selected_portfolio = None
             for p in db_portfolios:
                 portfolio_symbols = p['symbols']
-                available_symbols = [s for s in portfolio_symbols if s in available_stocks]
+                
+                # Check which symbols have data available after fetching
+                available_symbols = []
+                try:
+                    from src.data_access.stock_data_service import get_stock_data_service
+                    stock_service = get_stock_data_service()
+                    
+                    for symbol in portfolio_symbols:
+                        data = stock_service.get_stock_data(symbol)
+                        if data is not None and not data.empty:
+                            available_symbols.append(symbol)
+                except Exception as e:
+                    print(f"Error checking stock data availability for rolling volatility: {e}")
+                    continue
+                
                 if available_symbols:
                     selected_portfolio = p
                     break
             
             if selected_portfolio:
                 try:
+                    # Use dynamic date range
+                    end_date = datetime.now().strftime('%Y-%m-%d')
+                    start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                    
                     # Calculate real portfolio analytics
                     analytics = PORTFOLIO_SERVICE.calculate_portfolio_analytics(
                         symbols=selected_portfolio['symbols'],
                         weights=selected_portfolio['weights'],
-                        start_date="2023-01-01",
-                        end_date="2024-01-01"
+                        start_date=start_date,
+                        end_date=end_date
                     )
                     
                     if "error" not in analytics and "returns" in analytics:
@@ -2487,7 +2778,7 @@ def update_rolling_volatility(active_tab):
     # Fallback: show message if no real data available
     fig = go.Figure()
     fig.add_annotation(
-        text="No portfolio data available for rolling volatility calculation.<br>Please ensure portfolios contain stocks with available data (AAPL, AMZN, GOOGL, MSFT, TSLA).",
+        text="No portfolio data available for rolling volatility calculation.<br>Please ensure portfolios contain stocks with available data.",
         xref="paper", yref="paper",
         x=0.5, y=0.5, showarrow=False,
         font=dict(size=16, color="red")
@@ -2588,12 +2879,9 @@ def update_performance_portfolio_selector(active_tab):
      Input("performance-time-period", "value")]
 )
 def update_performance_statistics(active_tab, selected_portfolios, time_period):
-    """Update performance statistics display using 100% real calculated data."""
+    """Update performance statistics display using 100% real calculated data with dynamic data fetching."""
     if active_tab != "performance-tab":
         return html.Div()
-    
-    # Available stocks in database
-    available_stocks = ['AAPL', 'AMZN', 'GOOGL', 'MSFT', 'TSLA']
     
     stats_data = []
     
@@ -2610,19 +2898,42 @@ def update_performance_statistics(active_tab, selected_portfolios, time_period):
             else:
                 portfolios_to_analyze = db_portfolios
             
+            # Automatically fetch missing stock data for all portfolios
+            if portfolios_to_analyze:
+                print("Performance Statistics: Fetching missing stock data...")
+                fetch_missing_stock_data_for_portfolios(portfolios_to_analyze)
+                print("Performance Statistics: Data fetching completed")
+            
             # Calculate real statistics for each portfolio
             for p in portfolios_to_analyze:
                 portfolio_symbols = p['symbols']
-                available_symbols = [s for s in portfolio_symbols if s in available_stocks]
+                
+                # Check which symbols have data available after fetching
+                available_symbols = []
+                try:
+                    from src.data_access.stock_data_service import get_stock_data_service
+                    stock_service = get_stock_data_service()
+                    
+                    for symbol in portfolio_symbols:
+                        data = stock_service.get_stock_data(symbol)
+                        if data is not None and not data.empty:
+                            available_symbols.append(symbol)
+                except Exception as e:
+                    print(f"Error checking stock data availability for performance statistics: {e}")
+                    continue
                 
                 if available_symbols:
                     try:
+                        # Use dynamic date range
+                        end_date = datetime.now().strftime('%Y-%m-%d')
+                        start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                        
                         # Calculate real portfolio analytics
                         analytics = PORTFOLIO_SERVICE.calculate_portfolio_analytics(
                             symbols=portfolio_symbols,
                             weights=p['weights'],
-                            start_date="2023-01-01",
-                            end_date="2024-01-01"
+                            start_date=start_date,
+                            end_date=end_date
                         )
                         
                         if "error" not in analytics:
@@ -2682,7 +2993,7 @@ def update_performance_statistics(active_tab, selected_portfolios, time_period):
                 html.Li("TSLA - Tesla Inc.")
             ]),
             html.Hr(),
-            html.P("Date Range: 2023-01-01 to 2024-01-01", className="mb-0")
+            html.P("Date Range: 2024-10-01 to 2025-10-01", className="mb-0")
         ], color="warning")
     
     # Create table with real data

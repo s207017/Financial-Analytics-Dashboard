@@ -67,6 +67,10 @@ services:
     command: ["python", "-m", "src.visualization.dash_app.simple_app"]
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/quant_finance
+      - REDIS_URL=redis://redis:6379
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
       - ENVIRONMENT=production
     ports:
       - "8051:8050"
@@ -75,6 +79,8 @@ services:
       - ./logs:/app/logs
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
 
