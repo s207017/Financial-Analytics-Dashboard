@@ -386,14 +386,43 @@ def create_portfolio_management():
         dbc.Row([
             dbc.Col([
                 html.H3("My Portfolios"),
-                html.Div(id="portfolios-list")
+                html.Div(
+                    id="portfolios-loading-text",
+                    children=[
+                        html.Div([
+                            html.H5("Loading portfolios...", className="text-center mb-2 text-primary"),
+                            html.P("Fetching data from database and calculating returns...", 
+                                  className="text-center text-muted mb-0")
+                        ], className="text-center")
+                    ],
+                    style={"display": "none", "margin-bottom": "20px"}
+                ),
+                dcc.Loading(
+                    id="portfolios-loading",
+                    type="default",
+                    children=html.Div(id="portfolios-list"),
+                    style={"min-height": "200px"}
+                )
             ], width=8),
             dbc.Col([
                 html.H3("Portfolio Actions"),
                 dbc.Card([
                     dbc.CardBody([
                         html.Label("Select Portfolio:"),
-                        dcc.Dropdown(id="portfolio-selector", placeholder="Choose a portfolio"),
+                        html.Div(
+                            id="portfolio-selector-loading-text",
+                            children=[
+                                html.P("Loading portfolio options...", 
+                                      className="text-center text-muted mb-0 small")
+                            ],
+                            style={"display": "none", "margin-bottom": "10px"}
+                        ),
+                        dcc.Loading(
+                            id="portfolio-selector-loading",
+                            type="default",
+                            children=dcc.Dropdown(id="portfolio-selector", placeholder="Choose a portfolio"),
+                            style={"min-height": "50px"}
+                        ),
                         html.Br(),
                         dbc.Button("View Details", id="view-portfolio-btn", 
                                  color="info", className="me-2 mb-2", size="sm"),
@@ -1222,7 +1251,7 @@ def update_portfolios_list(active_tab, stored_data):
                         ], width=8),
                         dbc.Col([
                             html.H6(f"${portfolio['value']:,.0f}", className="text-primary mb-1"),
-                            html.P(f"Return: {format_return_display(portfolio['return'])}", 
+                            html.P(f"YoY Return: {format_return_display(portfolio['return'])}", 
                                   className=f"mb-0 text-{'success' if isinstance(portfolio['return'], (int, float)) and portfolio['return'] > 0.1 else 'warning'}"),
                             dbc.Button("Select", size="sm", color="outline-primary", 
                                      className="mt-2", id={"type": "select-portfolio-btn", "index": portfolio['name']})
@@ -1233,6 +1262,36 @@ def update_portfolios_list(active_tab, stored_data):
         )
     
     return portfolio_cards
+
+# Callback to show/hide loading text based on tab selection
+@app.callback(
+    [Output("portfolios-loading-text", "style"),
+     Output("portfolio-selector-loading-text", "style")],
+    [Input("tabs", "active_tab")],
+    prevent_initial_call=False
+)
+def show_loading_text_on_tab_click(active_tab):
+    """Show loading text immediately when Portfolio Management tab is clicked."""
+    if active_tab == "portfolio-mgmt-tab":
+        return {"display": "block", "margin-bottom": "20px"}, {"display": "block", "margin-bottom": "10px"}
+    else:
+        return {"display": "none"}, {"display": "none"}
+
+# Callback to hide loading text when portfolios are loaded
+@app.callback(
+    [Output("portfolios-loading-text", "style", allow_duplicate=True),
+     Output("portfolio-selector-loading-text", "style", allow_duplicate=True)],
+    [Input("portfolios-list", "children")],
+    [dash.dependencies.State("tabs", "active_tab")],
+    prevent_initial_call=True
+)
+def hide_loading_text_when_loaded(portfolios_children, active_tab):
+    """Hide loading text when portfolios are loaded."""
+    if active_tab == "portfolio-mgmt-tab" and portfolios_children and len(portfolios_children) > 0:
+        return {"display": "none"}, {"display": "none"}
+    else:
+        # Don't change the display if not on the right tab or no portfolios loaded
+        return dash.no_update, dash.no_update
 
 # Callback for select portfolio button clicks
 @app.callback(
@@ -1543,7 +1602,7 @@ def handle_other_portfolio_actions(view_clicks, delete_clicks, export_clicks, se
                 html.P(f"Strategy: {selected_portfolio_data['strategy']}"),
                             html.P(f"Assets: {format_assets_with_percentages(selected_portfolio_data)}"),
                 html.P(f"Value: ${selected_portfolio_data['value']:,.0f}"),
-                html.P(f"Return: {format_return_display(selected_portfolio_data['return'])}"),
+                html.P(f"YoY Return: {format_return_display(selected_portfolio_data['return'])}"),
                 html.P(f"Created: {selected_portfolio_data['created']}")
             ])
         ])
@@ -1813,7 +1872,7 @@ def update_portfolio(n_clicks, name, description, assets, value, strategy, selec
                         ], width=8),
                         dbc.Col([
                             html.H6(f"${portfolio['value']:,.0f}", className="text-primary mb-1"),
-                            html.P(f"Return: {format_return_display(portfolio['return'])}", 
+                            html.P(f"YoY Return: {format_return_display(portfolio['return'])}", 
                                   className=f"mb-0 text-{'success' if isinstance(portfolio['return'], (int, float)) and portfolio['return'] > 0.1 else 'warning'}"),
                             dbc.Button("Select", size="sm", color="outline-primary", 
                                      className="mt-2", id={"type": "select-portfolio-btn", "index": portfolio['name']})
@@ -1983,7 +2042,7 @@ def create_portfolio(n_clicks, name, description, assets, value, strategy, store
                         ], width=8),
                         dbc.Col([
                             html.H6(f"${portfolio['value']:,.0f}", className="text-primary mb-1"),
-                            html.P(f"Return: {format_return_display(portfolio['return'])}", 
+                            html.P(f"YoY Return: {format_return_display(portfolio['return'])}", 
                                   className=f"mb-0 text-{'success' if isinstance(portfolio['return'], (int, float)) and portfolio['return'] > 0.1 else 'warning'}"),
                             dbc.Button("Select", size="sm", color="outline-primary", 
                                      className="mt-2", id={"type": "select-portfolio-btn", "index": portfolio['name']})
@@ -2028,56 +2087,49 @@ def update_performance_comparison(active_tab, selected_portfolios):
         try:
             db_portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
             
-            for p in db_portfolios:
+            # Filter portfolios based on selection
+            portfolios_to_analyze = []
+            if selected_portfolios and len(selected_portfolios) > 0:
+                for p in db_portfolios:
+                    if p['name'] in selected_portfolios:
+                        portfolios_to_analyze.append(p)
+            else:
+                portfolios_to_analyze = db_portfolios  # Analyze all if none selected
+            
+            for p in portfolios_to_analyze:
                 # Check if portfolio has any stocks with available data
                 portfolio_symbols = p['symbols']
                 available_symbols = [s for s in portfolio_symbols if s in available_stocks]
                 
                 if available_symbols:  # Only process portfolios with available data
-                    # Calculate real portfolio performance
+                    # Calculate real portfolio performance using available symbols only
                     try:
-                        # Get portfolio analytics with real data
-                        analytics = PORTFOLIO_SERVICE.calculate_portfolio_analytics(
-                            symbols=portfolio_symbols,
-                            weights=p['weights'],
-                            start_date="2023-01-01",
-                            end_date="2024-01-01"
-                        )
+                        # Adjust weights for available symbols only
+                        available_weights = []
+                        for i, symbol in enumerate(portfolio_symbols):
+                            if symbol in available_symbols:
+                                available_weights.append(p['weights'][i])
                         
-                        if "error" not in analytics and "returns" in analytics:
-                            # Use real calculated returns
-                            returns = analytics["returns"]
-                            if len(returns) > 0:
-                                # Convert to cumulative returns
-                                cumulative_returns = (1 + returns).cumprod() - 1
-                                portfolios[p['name']] = cumulative_returns
-                        else:
-                            # Fallback: calculate using available symbols only
-                            if len(available_symbols) > 0:
-                                # Adjust weights for available symbols only
-                                available_weights = []
-                                for i, symbol in enumerate(portfolio_symbols):
-                                    if symbol in available_symbols:
-                                        available_weights.append(p['weights'][i])
-                                
-                                # Normalize weights
-                                total_weight = sum(available_weights)
-                                if total_weight > 0:
-                                    normalized_weights = [w/total_weight for w in available_weights]
-                                    
-                                    # Calculate performance with available data
-                                    analytics_available = PORTFOLIO_SERVICE.calculate_portfolio_analytics(
-                                        symbols=available_symbols,
-                                        weights=normalized_weights,
-                                        start_date="2023-01-01",
-                                        end_date="2024-01-01"
-                                    )
-                                    
-                                    if "error" not in analytics_available and "returns" in analytics_available:
-                                        returns = analytics_available["returns"]
-                                        if len(returns) > 0:
-                                            cumulative_returns = (1 + returns).cumprod() - 1
-                                            portfolios[f"{p['name']} (Partial)"] = cumulative_returns
+                        # Normalize weights
+                        total_weight = sum(available_weights)
+                        if total_weight > 0:
+                            normalized_weights = [w/total_weight for w in available_weights]
+                            
+                            # Calculate performance with available data
+                            analytics_available = PORTFOLIO_SERVICE.calculate_portfolio_analytics(
+                                symbols=available_symbols,
+                                weights=normalized_weights,
+                                start_date="2023-01-01",
+                                end_date="2024-01-01"
+                            )
+                            
+                            if "error" not in analytics_available and "returns" in analytics_available:
+                                returns = analytics_available["returns"]
+                                if len(returns) > 0:
+                                    cumulative_returns = (1 + returns).cumprod() - 1
+                                    # Show portfolio name with (Partial) if not all stocks are available
+                                    display_name = f"{p['name']} (Partial)" if len(available_symbols) < len(portfolio_symbols) else p['name']
+                                    portfolios[display_name] = cumulative_returns
                     except Exception as e:
                         print(f"Error calculating performance for {p['name']}: {e}")
                         continue

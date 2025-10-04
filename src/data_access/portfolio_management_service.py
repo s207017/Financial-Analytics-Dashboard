@@ -13,14 +13,28 @@ from config.config import DATABASE_CONFIG
 
 logger = logging.getLogger(__name__)
 
+# Import stock data service
+try:
+    from .stock_data_service import get_stock_data_service
+    STOCK_DATA_AVAILABLE = True
+except ImportError:
+    STOCK_DATA_AVAILABLE = False
+    logger.warning("Stock data service not available")
+
 class PortfolioManagementService:
     """Service for managing multiple portfolios"""
     
     def __init__(self):
-        self.engine = create_engine(
-            f"postgresql://{DATABASE_CONFIG['user']}:{DATABASE_CONFIG['password']}@"
-            f"{DATABASE_CONFIG['host']}:{DATABASE_CONFIG['port']}/{DATABASE_CONFIG['name']}"
-        )
+        # Use DATABASE_URL environment variable if available, otherwise use config
+        import os
+        database_url = os.getenv('DATABASE_URL')
+        if database_url:
+            self.engine = create_engine(database_url)
+        else:
+            self.engine = create_engine(
+                f"postgresql://{DATABASE_CONFIG['user']}:{DATABASE_CONFIG['password']}@"
+                f"{DATABASE_CONFIG['host']}:{DATABASE_CONFIG['port']}/{DATABASE_CONFIG['name']}"
+            )
     
     def create_portfolio(self, name: str, description: str, symbols: List[str], 
                         weights: List[float], strategy: str = "Custom") -> Dict[str, Any]:
@@ -32,6 +46,17 @@ class PortfolioManagementService:
             
             if abs(sum(weights) - 1.0) > 0.01:
                 raise ValueError("Weights must sum to 1.0")
+            
+            # Ensure stock data is available for all symbols
+            if STOCK_DATA_AVAILABLE:
+                logger.info(f"Ensuring stock data is available for symbols: {symbols}")
+                stock_service = get_stock_data_service()
+                results = stock_service.ensure_stock_data_available(symbols)
+                
+                failed_symbols = [symbol for symbol, success in results.items() if not success]
+                if failed_symbols:
+                    logger.warning(f"Failed to fetch data for symbols: {failed_symbols}")
+                    # Continue anyway - user might want to add stocks that don't exist yet
             
             # Create portfolio record
             portfolio_data = {
@@ -214,17 +239,39 @@ class PortfolioManagementService:
             if not end_date:
                 end_date = datetime.now().strftime('%Y-%m-%d')
             
-            # Build query for stock prices
-            symbol_list = "','".join(symbols)
-            query = f"""
-                SELECT symbol, date, close, volume
-                FROM stock_prices 
-                WHERE symbol IN ('{symbol_list}')
-                AND date >= '{start_date}' AND date <= '{end_date}'
-                ORDER BY date, symbol
-            """
-            
-            price_data = pd.read_sql(query, self.engine)
+            # Try to use stock data service first
+            if STOCK_DATA_AVAILABLE:
+                stock_service = get_stock_data_service()
+                
+                # Collect data for all symbols
+                all_data = []
+                available_symbols = []
+                
+                for symbol in symbols:
+                    df = stock_service.get_stock_data(symbol, start_date, end_date)
+                    if df is not None and not df.empty:
+                        df['symbol'] = symbol
+                        all_data.append(df.reset_index())
+                        available_symbols.append(symbol)
+                
+                if all_data:
+                    price_data = pd.concat(all_data, ignore_index=True)
+                    price_data = price_data[['symbol', 'date', 'close']]
+                else:
+                    price_data = pd.DataFrame()
+            else:
+                # Fallback to direct database query
+                symbol_list = "','".join(symbols)
+                query = f"""
+                    SELECT symbol, date, close, volume
+                    FROM stock_prices 
+                    WHERE symbol IN ('{symbol_list}')
+                    AND date >= '{start_date}' AND date <= '{end_date}'
+                    ORDER BY date, symbol
+                """
+                
+                price_data = pd.read_sql(query, self.engine)
+                available_symbols = price_data['symbol'].unique().tolist() if not price_data.empty else []
             
             if price_data.empty:
                 return {"error": "No price data available for the selected symbols"}

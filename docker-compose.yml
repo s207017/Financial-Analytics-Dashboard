@@ -64,7 +64,7 @@ services:
   dashboard:
     build: .
     container_name: quant-finance-dashboard
-    command: ["python", "-m", "src.visualization.dash_app.app"]
+    command: ["python", "-m", "src.visualization.dash_app.simple_app"]
     environment:
       - DATABASE_URL=postgresql://postgres:password@postgres:5432/quant_finance
       - ENVIRONMENT=production
