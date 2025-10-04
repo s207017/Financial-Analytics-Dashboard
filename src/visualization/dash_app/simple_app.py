@@ -56,6 +56,32 @@ def format_return_display(return_value):
     else:
         return f"{return_value:.1%}"
 
+def format_assets_with_percentages(portfolio):
+    """Format assets with their percentage allocations."""
+    if 'symbols' in portfolio and 'weights' in portfolio:
+        # Database portfolio format
+        symbols = portfolio['symbols']
+        weights = portfolio['weights']
+    elif 'assets' in portfolio and 'weights' in portfolio:
+        # Fallback format
+        symbols = portfolio['assets']
+        weights = portfolio['weights']
+    else:
+        # No weights available, just show symbols
+        symbols = portfolio.get('symbols', portfolio.get('assets', []))
+        return ', '.join(symbols)
+    
+    # Format as "SYMBOL (XX%)"
+    formatted_assets = []
+    for i, symbol in enumerate(symbols):
+        if i < len(weights):
+            percentage = weights[i] * 100
+            formatted_assets.append(f"{symbol} ({percentage:.0f}%)")
+        else:
+            formatted_assets.append(symbol)
+    
+    return ', '.join(formatted_assets)
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -925,14 +951,74 @@ def update_drawdown_chart(active_tab):
 
 # Callback for portfolio weights display
 @app.callback(
-    Output("portfolio-weights-display", "children"),
+    [Output("portfolio-weights-display", "children"),
+     Output("portfolio-name", "value", allow_duplicate=True),
+     Output("portfolio-description", "value", allow_duplicate=True),
+     Output("asset-selector", "value", allow_duplicate=True),
+     Output("portfolio-value", "value", allow_duplicate=True),
+     Output("portfolio-strategy", "value", allow_duplicate=True)],
     [Input("asset-selector", "value"),
-     Input("portfolio-strategy", "value")]
+     Input("portfolio-strategy", "value"),
+     Input("portfolio-selector", "value")],
+    prevent_initial_call=True
 )
-def update_portfolio_weights(selected_assets, strategy):
+def update_portfolio_weights(selected_assets, strategy, selected_portfolio):
     """Update portfolio weights display based on selected assets and strategy."""
+    # Only show weights if a portfolio is selected from the list
+    if not selected_portfolio:
+        return (html.Div([
+            html.P("Please select a portfolio below", className="text-muted text-center")
+        ]), no_update, no_update, no_update, no_update, no_update)
+    
+    # Load portfolio data from database
+    portfolio_data = None
+    if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
+        try:
+            db_portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
+            for p in db_portfolios:
+                if p["name"] == selected_portfolio:
+                    portfolio_data = {
+                        "name": p["name"],
+                        "description": p.get("description", ""),
+                        "assets": p["symbols"],
+                        "value": 100000,  # Default value
+                        "strategy": p["strategy"].lower().replace(" ", "_"),
+                        "weights": p["weights"]
+                    }
+                    break
+        except Exception as e:
+            print(f"Error loading portfolio data: {e}")
+    
+    # If portfolio data found, populate form and show weights
+    if portfolio_data:
+        # Use portfolio data for weights display
+        assets = portfolio_data["assets"]
+        weights = portfolio_data["weights"]
+        
+        # Create weight display
+        weight_items = []
+        for asset, weight in zip(assets, weights):
+            weight_items.append(
+                dbc.Row([
+                    dbc.Col(html.Strong(asset), width=4),
+                    dbc.Col(html.Span(f"{weight:.1%}"), width=4),
+                    dbc.Col(
+                        dbc.Progress(value=weight*100, color="primary", className="mb-1"),
+                        width=4
+                    )
+                ], className="mb-2")
+            )
+        
+        return (weight_items, 
+                portfolio_data["name"],
+                portfolio_data["description"], 
+                portfolio_data["assets"],
+                portfolio_data["value"],
+                portfolio_data["strategy"])
+    
+    # Fallback to form-based calculation
     if not selected_assets:
-        return html.Div("Select assets to see weights")
+        return (html.Div("Select assets to see weights"), no_update, no_update, no_update, no_update, no_update)
     
     # Calculate weights based on strategy
     n_assets = len(selected_assets)
@@ -961,21 +1047,50 @@ def update_portfolio_weights(selected_assets, strategy):
             ], className="mb-2")
         )
     
-    return weight_items
+    return (weight_items, no_update, no_update, no_update, no_update, no_update)
 
 # Callback for portfolio summary
 @app.callback(
     Output("portfolio-summary", "children"),
     [Input("asset-selector", "value"),
      Input("portfolio-value", "value"),
-     Input("portfolio-strategy", "value")]
+     Input("portfolio-strategy", "value"),
+     Input("portfolio-selector", "value")]
 )
-def update_portfolio_summary(selected_assets, portfolio_value, strategy):
+def update_portfolio_summary(selected_assets, portfolio_value, strategy, selected_portfolio):
     """Update portfolio summary."""
-    if not selected_assets or not portfolio_value:
-        return html.Div("Configure portfolio to see summary")
+    # Only show summary if a portfolio is selected from the list
+    if not selected_portfolio:
+        return html.Div([
+            html.P("Please select a portfolio below", className="text-muted text-center")
+        ])
     
-    n_assets = len(selected_assets)
+    # Load portfolio data from database
+    portfolio_data = None
+    if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
+        try:
+            db_portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
+            for p in db_portfolios:
+                if p["name"] == selected_portfolio:
+                    portfolio_data = {
+                        "assets": p["symbols"],
+                        "value": 100000,  # Default value
+                        "weights": p["weights"]
+                    }
+                    break
+        except Exception as e:
+            print(f"Error loading portfolio data for summary: {e}")
+    
+    # Use portfolio data if available, otherwise use form data
+    if portfolio_data:
+        assets = portfolio_data["assets"]
+        portfolio_value = portfolio_data["value"]
+    else:
+        assets = selected_assets
+        if not assets or not portfolio_value:
+            return html.Div("Configure portfolio to see summary")
+    
+    n_assets = len(assets)
     weight_per_asset = 1.0 / n_assets
     value_per_asset = portfolio_value * weight_per_asset
     
@@ -1048,6 +1163,8 @@ def update_portfolios_list(active_tab, stored_data):
                     "description": p.get("description", ""),
                     "strategy": p["strategy"],
                     "assets": p["symbols"],
+                    "symbols": p["symbols"],  # Keep symbols for format_assets_with_percentages
+                    "weights": p["weights"],  # Keep weights for format_assets_with_percentages
                     "value": 100000,  # Default value
                     "return": portfolio_return,
                     "created": p["created_at"][:10] if p.get("created_at") else datetime.now().strftime("%Y-%m-%d")
@@ -1100,7 +1217,7 @@ def update_portfolios_list(active_tab, stored_data):
                         dbc.Col([
                             html.H5(portfolio["name"], className="mb-1"),
                             html.P(f"Strategy: {portfolio['strategy']}", className="mb-1 text-muted"),
-                            html.P(f"Assets: {', '.join(portfolio['assets'])}", className="mb-1 text-muted"),
+                            html.P(f"Assets: {format_assets_with_percentages(portfolio)}", className="mb-1 text-muted"),
                             html.P(f"Created: {portfolio['created']}", className="mb-0 text-muted")
                         ], width=8),
                         dbc.Col([
@@ -1108,7 +1225,7 @@ def update_portfolios_list(active_tab, stored_data):
                             html.P(f"Return: {format_return_display(portfolio['return'])}", 
                                   className=f"mb-0 text-{'success' if isinstance(portfolio['return'], (int, float)) and portfolio['return'] > 0.1 else 'warning'}"),
                             dbc.Button("Select", size="sm", color="outline-primary", 
-                                     className="mt-2", id=f"select-{portfolio['name'].lower().replace(' ', '-')}")
+                                     className="mt-2", id={"type": "select-portfolio-btn", "index": portfolio['name']})
                         ], width=4)
                     ])
                 ])
@@ -1116,6 +1233,27 @@ def update_portfolios_list(active_tab, stored_data):
         )
     
     return portfolio_cards
+
+# Callback for select portfolio button clicks
+@app.callback(
+    Output("portfolio-selector", "value"),
+    [Input({"type": "select-portfolio-btn", "index": dash.dependencies.ALL}, "n_clicks")],
+    prevent_initial_call=True
+)
+def handle_select_portfolio_button(select_clicks):
+    """Handle select portfolio button clicks."""
+    ctx = callback_context
+    if not ctx.triggered:
+        return no_update
+    
+    # Get the portfolio name from the button that was clicked
+    button_id = ctx.triggered[0]["prop_id"]
+    if "select-portfolio-btn" in button_id:
+        # Extract portfolio name from the button ID
+        portfolio_name = ctx.triggered[0]["prop_id"].split('"index":"')[1].split('"')[0]
+        return portfolio_name
+    
+    return no_update
 
 # Callback for portfolio selector dropdown
 @app.callback(
@@ -1221,48 +1359,67 @@ def handle_portfolio_actions(edit_clicks, clone_clicks, selected_portfolio, stor
     if not selected_portfolio:
         return no_update, no_update, no_update, no_update, no_update
     
-    # Load portfolios from storage
-    if stored_data:
-        try:
-            import json
-            portfolios = json.loads(stored_data)
-        except:
-            portfolios = []
-    else:
-        # Use default portfolios if no stored data
-        portfolios = [
-            {
-                "name": "Tech Growth Portfolio",
-                "strategy": "Equal Weight",
-                "assets": ["AAPL", "GOOGL", "MSFT", "NVDA"],
-                "value": 125000,
-                "return": 0.15,
-                "created": "2024-01-15"
-            },
-            {
-                "name": "Conservative Portfolio",
-                "strategy": "Market Cap",
-                "assets": ["AAPL", "MSFT", "GOOGL"],
-                "value": 85000,
-                "return": 0.08,
-                "created": "2024-02-01"
-            },
-            {
-                "name": "High Risk Portfolio",
-                "strategy": "Custom",
-                "assets": ["TSLA", "NVDA", "META"],
-                "value": 75000,
-                "return": 0.22,
-                "created": "2024-02-10"
-            }
-        ]
-    
-    # Find the selected portfolio
+    # Try to load portfolio from database first
     selected_portfolio_data = None
-    for portfolio in portfolios:
-        if portfolio["name"] == selected_portfolio:
-            selected_portfolio_data = portfolio
-            break
+    if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
+        try:
+            db_portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
+            for portfolio in db_portfolios:
+                if portfolio["name"] == selected_portfolio:
+                    selected_portfolio_data = {
+                        "name": portfolio["name"],
+                        "description": portfolio.get("description", ""),
+                        "assets": portfolio["symbols"],
+                        "value": 100000,  # Default value since we don't store this in DB
+                        "strategy": portfolio["strategy"],
+                        "weights": portfolio["weights"]
+                    }
+                    break
+        except Exception as e:
+            print(f"Error loading portfolio from database: {e}")
+    
+    # Fallback to stored data if database not available or portfolio not found
+    if not selected_portfolio_data:
+        if stored_data:
+            try:
+                import json
+                portfolios = json.loads(stored_data)
+            except:
+                portfolios = []
+        else:
+            # Use default portfolios if no stored data
+            portfolios = [
+                {
+                    "name": "Tech Growth Portfolio",
+                    "strategy": "Equal Weight",
+                    "assets": ["AAPL", "GOOGL", "MSFT", "NVDA"],
+                    "value": 125000,
+                    "return": 0.15,
+                    "created": "2024-01-15"
+                },
+                {
+                    "name": "Conservative Portfolio",
+                    "strategy": "Market Cap",
+                    "assets": ["AAPL", "MSFT", "GOOGL"],
+                    "value": 85000,
+                    "return": 0.08,
+                    "created": "2024-02-01"
+                },
+                {
+                    "name": "High Risk Portfolio",
+                    "strategy": "Custom",
+                    "assets": ["TSLA", "NVDA", "META"],
+                    "value": 75000,
+                    "return": 0.22,
+                    "created": "2024-02-10"
+                }
+            ]
+        
+        # Find the selected portfolio in stored data
+        for portfolio in portfolios:
+            if portfolio["name"] == selected_portfolio:
+                selected_portfolio_data = portfolio
+                break
     
     if not selected_portfolio_data:
         return no_update, no_update, no_update, no_update, no_update
@@ -1384,7 +1541,7 @@ def handle_other_portfolio_actions(view_clicks, delete_clicks, export_clicks, se
             dbc.CardBody([
                 html.H5(selected_portfolio_data["name"]),
                 html.P(f"Strategy: {selected_portfolio_data['strategy']}"),
-                html.P(f"Assets: {', '.join(selected_portfolio_data['assets'])}"),
+                            html.P(f"Assets: {format_assets_with_percentages(selected_portfolio_data)}"),
                 html.P(f"Value: ${selected_portfolio_data['value']:,.0f}"),
                 html.P(f"Return: {format_return_display(selected_portfolio_data['return'])}"),
                 html.P(f"Created: {selected_portfolio_data['created']}")
@@ -1410,14 +1567,39 @@ def handle_other_portfolio_actions(view_clicks, delete_clicks, export_clicks, se
      Output("portfolio-value", "style")],
     [Input("portfolio-strategy", "value"),
      Input("asset-selector", "value")],
+    [dash.dependencies.State("portfolio-selector", "value")],
     prevent_initial_call=False
 )
-def handle_custom_strategy(strategy, selected_assets):
+def handle_custom_strategy(strategy, selected_assets, selected_portfolio):
     """Handle custom strategy UI - show individual stock amounts."""
     if strategy == "custom" and selected_assets:
         # Create individual amount inputs for each selected asset
         amount_inputs = []
+        
+        # Try to get portfolio weights from database for custom amounts
+        custom_amounts = {}
+        if DATABASE_AVAILABLE and PORTFOLIO_SERVICE and selected_portfolio:
+            try:
+                db_portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
+                for portfolio in db_portfolios:
+                    if portfolio["name"] == selected_portfolio and portfolio["strategy"] == "Custom":
+                        # Calculate amounts based on weights and total value
+                        total_value = 100000  # Default total value
+                        for i, symbol in enumerate(portfolio["symbols"]):
+                            if i < len(portfolio["weights"]):
+                                custom_amounts[symbol] = int(total_value * portfolio["weights"][i])
+                        break
+            except Exception as e:
+                print(f"Error loading custom amounts: {e}")
+        
         for i, asset in enumerate(selected_assets):
+            # Use custom amount if available, otherwise default to equal distribution
+            if asset in custom_amounts:
+                default_amount = custom_amounts[asset]
+            else:
+                # Equal distribution as fallback
+                default_amount = int(100000 / len(selected_assets)) if selected_assets else 0
+            
             amount_inputs.append(
                 dbc.Row([
                     dbc.Col([
@@ -1425,7 +1607,7 @@ def handle_custom_strategy(strategy, selected_assets):
                         dbc.Input(
                             id={"type": "amount-input", "index": asset},
                             type="number",
-                            value=0,
+                            value=default_amount,
                             min=0,
                             step=100
                         )
@@ -1626,7 +1808,7 @@ def update_portfolio(n_clicks, name, description, assets, value, strategy, selec
                         dbc.Col([
                             html.H5(portfolio["name"], className="mb-1"),
                             html.P(f"Strategy: {portfolio['strategy']}", className="mb-1 text-muted"),
-                            html.P(f"Assets: {', '.join(portfolio['assets'])}", className="mb-1 text-muted"),
+                            html.P(f"Assets: {format_assets_with_percentages(portfolio)}", className="mb-1 text-muted"),
                             html.P(f"Created: {portfolio['created']}", className="mb-0 text-muted")
                         ], width=8),
                         dbc.Col([
@@ -1634,7 +1816,7 @@ def update_portfolio(n_clicks, name, description, assets, value, strategy, selec
                             html.P(f"Return: {format_return_display(portfolio['return'])}", 
                                   className=f"mb-0 text-{'success' if isinstance(portfolio['return'], (int, float)) and portfolio['return'] > 0.1 else 'warning'}"),
                             dbc.Button("Select", size="sm", color="outline-primary", 
-                                     className="mt-2", id=f"select-{portfolio['name'].lower().replace(' ', '-')}")
+                                     className="mt-2", id={"type": "select-portfolio-btn", "index": portfolio['name']})
                         ], width=4)
                     ])
                 ])
@@ -1796,7 +1978,7 @@ def create_portfolio(n_clicks, name, description, assets, value, strategy, store
                         dbc.Col([
                             html.H5(portfolio["name"], className="mb-1"),
                             html.P(f"Strategy: {portfolio['strategy']}", className="mb-1 text-muted"),
-                            html.P(f"Assets: {', '.join(portfolio['assets'])}", className="mb-1 text-muted"),
+                            html.P(f"Assets: {format_assets_with_percentages(portfolio)}", className="mb-1 text-muted"),
                             html.P(f"Created: {portfolio['created']}", className="mb-0 text-muted")
                         ], width=8),
                         dbc.Col([
@@ -1804,7 +1986,7 @@ def create_portfolio(n_clicks, name, description, assets, value, strategy, store
                             html.P(f"Return: {format_return_display(portfolio['return'])}", 
                                   className=f"mb-0 text-{'success' if isinstance(portfolio['return'], (int, float)) and portfolio['return'] > 0.1 else 'warning'}"),
                             dbc.Button("Select", size="sm", color="outline-primary", 
-                                     className="mt-2", id=f"select-{portfolio['name'].lower().replace(' ', '-')}")
+                                     className="mt-2", id={"type": "select-portfolio-btn", "index": portfolio['name']})
                         ], width=4)
                     ])
                 ])
@@ -1830,9 +2012,10 @@ def create_portfolio(n_clicks, name, description, assets, value, strategy, store
 # Callback for performance comparison chart
 @app.callback(
     Output("performance-comparison-chart", "figure"),
-    [Input("tabs", "active_tab")]
+    [Input("tabs", "active_tab"),
+     Input("performance-portfolio-selector", "value")]
 )
-def update_performance_comparison(active_tab):
+def update_performance_comparison(active_tab, selected_portfolios):
     """Update performance comparison chart using 100% real calculated data."""
     if active_tab != "performance-tab":
         return go.Figure()
@@ -1905,14 +2088,23 @@ def update_performance_comparison(active_tab):
     # If no real data available, show message
     if not portfolios:
         fig = go.Figure()
+        
+        # Check if portfolios are selected from dropdown
+        if not selected_portfolios or len(selected_portfolios) == 0:
+            message = "Please select a portfolio"
+            title = "Portfolio Performance Comparison"
+        else:
+            message = "No portfolio data available for performance comparison.<br>Please ensure portfolios contain stocks with available data (AAPL, AMZN, GOOGL, MSFT, TSLA)."
+            title = "Portfolio Performance Comparison - No Data Available"
+        
         fig.add_annotation(
-            text="No portfolio data available for performance comparison.<br>Please ensure portfolios contain stocks with available data (AAPL, AMZN, GOOGL, MSFT, TSLA).",
+            text=message,
             xref="paper", yref="paper",
             x=0.5, y=0.5, showarrow=False,
             font=dict(size=16, color="red")
         )
         fig.update_layout(
-            title="Portfolio Performance Comparison - No Data Available",
+            title=title,
             xaxis=dict(visible=False),
             yaxis=dict(visible=False)
         )
