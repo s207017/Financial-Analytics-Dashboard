@@ -176,8 +176,6 @@ app.layout = dbc.Container([
                 dbc.Tab(label="Portfolio Management", tab_id="portfolio-mgmt-tab"),
                 dbc.Tab(label="Risk Analysis", tab_id="risk-tab"),
                 dbc.Tab(label="Performance Metrics", tab_id="performance-tab"),
-                dbc.Tab(label="Correlation Analysis", tab_id="correlation-tab"),
-                dbc.Tab(label="Optimization", tab_id="optimization-tab"),
             ], id="tabs", active_tab="portfolio-tab")
         ])
     ], className="mb-4"),
@@ -429,28 +427,6 @@ def create_performance_metrics():
         ])
     ])
 
-# Correlation Analysis Tab
-def create_correlation_analysis():
-    """Create correlation analysis tab content."""
-    return dbc.Container([
-        dbc.Row([
-            dbc.Col([
-                html.H3("Correlation Heatmap"),
-                dcc.Graph(id="correlation-heatmap")
-            ], width=8),
-            dbc.Col([
-                html.H3("Correlation Statistics"),
-                html.Div(id="correlation-stats")
-            ], width=4)
-        ]),
-        
-        dbc.Row([
-            dbc.Col([
-                html.H3("Rolling Correlation"),
-                dcc.Graph(id="rolling-correlation-chart")
-            ], width=12)
-        ])
-    ])
 
 # Portfolio Management Tab
 def create_portfolio_management():
@@ -618,51 +594,6 @@ def create_portfolio_management():
         ])
     ])
 
-# Optimization Tab
-def create_optimization():
-    """Create optimization tab content."""
-    return dbc.Container([
-        dbc.Row([
-            dbc.Col([
-                html.H3("Efficient Frontier"),
-                dcc.Graph(id="efficient-frontier-chart")
-            ], width=8),
-            dbc.Col([
-                html.H3("Optimization Parameters"),
-                dbc.Card([
-                    dbc.CardBody([
-                        html.Label("Risk Aversion:"),
-                        dcc.Slider(
-                            id="risk-aversion-slider",
-                            min=0.1, max=5.0, step=0.1, value=1.0,
-                            marks={i: str(i) for i in [0.1, 1.0, 2.0, 3.0, 4.0, 5.0]}
-                        ),
-                        html.Br(),
-                        html.Label("Target Return:"),
-                        dcc.Slider(
-                            id="target-return-slider",
-                            min=0.0, max=0.3, step=0.01, value=0.1,
-                            marks={i/10: f"{i*10}%" for i in range(0, 31, 5)}
-                        ),
-                        html.Br(),
-                        dbc.Button("Optimize Portfolio", id="optimize-button", 
-                                 color="primary", className="mt-2")
-                    ])
-                ])
-            ], width=4)
-        ]),
-        
-        dbc.Row([
-            dbc.Col([
-                html.H3("Optimized Portfolio Weights"),
-                dcc.Graph(id="optimized-weights-chart")
-            ], width=6),
-            dbc.Col([
-                html.H3("Optimization Results"),
-                html.Div(id="optimization-results")
-            ], width=6)
-        ])
-    ])
 
 # Callback to add custom symbols to the dropdown
 @app.callback(
@@ -713,10 +644,6 @@ def render_tab_content(active_tab):
         return create_risk_analysis()
     elif active_tab == "performance-tab":
         return create_performance_metrics()
-    elif active_tab == "correlation-tab":
-        return create_correlation_analysis()
-    elif active_tab == "optimization-tab":
-        return create_optimization()
     else:
         return html.Div("Select a tab to view content")
 
