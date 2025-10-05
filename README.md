@@ -40,7 +40,7 @@ docker-compose logs -f dashboard
 ```
 
 ### 4. Access the Dashboard
-- **Portfolio Management Dashboard**: http://localhost:8050
+- **Portfolio Management Dashboard**: http://localhost:8051
 - **Database**: localhost:5432 (postgres/quant_finance)
 - **Redis**: localhost:6379
 
@@ -285,25 +285,11 @@ FLASK_ENV=development
 DEBUG=True
 ```
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature-name`
-3. Make your changes
-4. Add tests for new functionality
-5. Commit with conventional commits: `git commit -m "feat: add new feature"`
-6. Push to your fork: `git push origin feature-name`
-7. Submit a pull request
 
 ## 📄 License
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
-## 🆘 Support
-
-- **Issues**: [GitHub Issues](https://github.com/s207017/Financial-Analytics-Dashboard/issues)
-- **Documentation**: Check the `/docs` folder for detailed guides
-- **Docker Issues**: Ensure Docker and Docker Compose are properly installed
 
 ---
 

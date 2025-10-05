@@ -1,6 +1,8 @@
 """
 Simplified Dash application that can run without database connection.
+Refactored with improved design principles.
 """
+from typing import List, Dict, Any, Optional, Tuple, Union
 import dash
 from dash import dcc, html, Input, Output, callback_context, no_update
 import plotly.graph_objs as go
@@ -14,75 +16,111 @@ import sys
 import os
 import json
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Add the project root to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
 
+# Configuration constants
+DEFAULT_START_DATE = "2023-01-01"
+DEFAULT_END_DATE = datetime.now().strftime("%Y-%m-%d")
+DEFAULT_ANALYSIS_PERIOD_DAYS = 365
+ROLLING_WINDOW_DAYS = 30
+CHART_COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
+
+# Error messages
+ERROR_MESSAGES = {
+    "database_unavailable": "Database not available",
+    "no_portfolios": "No portfolios found",
+    "invalid_symbols": "Invalid stock symbols",
+    "data_unavailable": "Data Unavailable",
+    "loading_error": "Error loading data",
+    "calculation_error": "Error calculating metrics"
+}
+
+# Initialize database connection with improved error handling
 try:
     from src.data_access.portfolio_management_service import PortfolioManagementService
     PORTFOLIO_SERVICE = PortfolioManagementService()
     DATABASE_AVAILABLE = True
+    logger.info("Database connection established successfully")
 except Exception as e:
-    print(f"Database not available: {e}")
+    logger.warning(f"Database not available: {e}")
     PORTFOLIO_SERVICE = None
     DATABASE_AVAILABLE = False
 
-def calculate_portfolio_return(symbols, weights, start_date=None, end_date=None):
+
+def calculate_portfolio_return(symbols: List[str], weights: List[float], 
+                             start_date: Optional[str] = None, 
+                             end_date: Optional[str] = None) -> str:
     """Calculate actual portfolio return based on historical data."""
     try:
-        if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
-            # Use the portfolio service to calculate real analytics
-            analytics = PORTFOLIO_SERVICE.calculate_portfolio_analytics(
-                symbols=symbols,
-                weights=weights,
-                start_date=start_date or "2023-01-01",
-                end_date=end_date or datetime.now().strftime("%Y-%m-%d")
-            )
-            # Check if analytics contains an error
-            if "error" in analytics:
-                return "Data Unavailable"
-            return analytics.get("total_return", "Data Unavailable")
-        else:
-            # Database not available
-            return "Data Unavailable"
+        if not DATABASE_AVAILABLE or not PORTFOLIO_SERVICE:
+            logger.warning("Database not available for portfolio return calculation")
+            return ERROR_MESSAGES["data_unavailable"]
+        
+        # Use the portfolio service to calculate real analytics
+        analytics = PORTFOLIO_SERVICE.calculate_portfolio_analytics(
+            symbols=symbols,
+            weights=weights,
+            start_date=start_date or DEFAULT_START_DATE,
+            end_date=end_date or DEFAULT_END_DATE
+        )
+        
+        # Check if analytics contains an error
+        if "error" in analytics:
+            logger.error(f"Analytics error: {analytics.get('error')}")
+            return ERROR_MESSAGES["data_unavailable"]
+        
+        return analytics.get("total_return", ERROR_MESSAGES["data_unavailable"])
+        
     except Exception as e:
-        print(f"Error calculating portfolio return: {e}")
-        # Return "Data Unavailable" on error
-        return "Data Unavailable"
+        logger.error(f"Error calculating portfolio return: {e}")
+        return ERROR_MESSAGES["data_unavailable"]
 
-def format_return_display(return_value):
+def format_return_display(return_value: Union[str, int, float]) -> str:
     """Format return value for display - handles both numeric and string values."""
     if isinstance(return_value, str):
         return return_value
-    else:
+    elif isinstance(return_value, (int, float)):
         return f"{return_value:.1%}"
-
-def format_assets_with_percentages(portfolio):
-    """Format assets with their percentage allocations."""
-    if 'symbols' in portfolio and 'weights' in portfolio:
-        # Database portfolio format
-        symbols = portfolio['symbols']
-        weights = portfolio['weights']
-    elif 'assets' in portfolio and 'weights' in portfolio:
-        # Fallback format
-        symbols = portfolio['assets']
-        weights = portfolio['weights']
     else:
-        # No weights available, just show symbols
-        symbols = portfolio.get('symbols', portfolio.get('assets', []))
-        return ', '.join(symbols)
-    
-    # Format as "SYMBOL (XX%)"
-    formatted_assets = []
-    for i, symbol in enumerate(symbols):
-        if i < len(weights):
-            percentage = weights[i] * 100
-            formatted_assets.append(f"{symbol} ({percentage:.0f}%)")
-        else:
-            formatted_assets.append(symbol)
-    
-    return ', '.join(formatted_assets)
+        return "N/A"
 
-def validate_stock_symbols(symbols):
+def format_assets_with_percentages(portfolio: Dict[str, Any]) -> str:
+    """Format assets with their percentage allocations."""
+    try:
+        if 'symbols' in portfolio and 'weights' in portfolio:
+            # Database portfolio format
+            symbols = portfolio['symbols']
+            weights = portfolio['weights']
+        elif 'assets' in portfolio and 'weights' in portfolio:
+            # Fallback format
+            symbols = portfolio['assets']
+            weights = portfolio['weights']
+        else:
+            # No weights available, just show symbols
+            symbols = portfolio.get('symbols', portfolio.get('assets', []))
+            return ', '.join(symbols)
+        
+        # Format as "SYMBOL (XX%)"
+        formatted_assets = []
+        for i, symbol in enumerate(symbols):
+            if i < len(weights):
+                percentage = weights[i] * 100
+                formatted_assets.append(f"{symbol} ({percentage:.0f}%)")
+            else:
+                formatted_assets.append(symbol)
+        
+        return ', '.join(formatted_assets)
+        
+    except Exception as e:
+        logger.error(f"Error formatting assets: {e}")
+        return "Error formatting assets"
+
+def validate_stock_symbols(symbols: List[str]) -> Tuple[List[str], List[str]]:
     """Validate stock symbols and fetch data for new symbols."""
     if not symbols:
         return [], []
@@ -123,14 +161,14 @@ def validate_stock_symbols(symbols):
                 print(f"❌ Failed to fetch data for {symbol}")
                 
     except Exception as e:
-        print(f"Error validating stock symbols: {e}")
+        logger.error(f"Error validating stock symbols: {e}")
         # If validation fails, return the original symbols as valid
         valid_symbols = [s.upper().strip() for s in symbols if s.strip()]
         invalid_symbols = []
     
     return valid_symbols, invalid_symbols
 
-def fetch_missing_stock_data_for_portfolios(portfolios):
+def fetch_missing_stock_data_for_portfolios(portfolios: List[Dict[str, Any]]) -> None:
     """Fetch missing stock data for all symbols in the given portfolios."""
     if not portfolios:
         return portfolios
@@ -3616,6 +3654,7 @@ def update_performance_comparison_enhanced(active_tab, selected_portfolios, time
     )
     
     return fig
+
 
 if __name__ == "__main__":
     print("Starting Quantitative Finance Pipeline Dashboard...")
