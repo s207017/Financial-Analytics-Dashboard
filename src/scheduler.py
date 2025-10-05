@@ -70,6 +70,13 @@ class PipelineScheduler:
         except Exception as e:
             logger.error(f"Error in monthly full analysis: {str(e)}")
     
+    def check_monthly_analysis(self):
+        """Check if it's the first day of the month and run monthly analysis."""
+        from datetime import datetime
+        now = datetime.now()
+        if now.day == 1:  # First day of the month
+            self.monthly_full_analysis()
+    
     def setup_schedule(self):
         """Set up the scheduling."""
         # Daily data collection at 6 PM (after market close)
@@ -82,7 +89,7 @@ class PipelineScheduler:
         schedule.every().sunday.at("19:00").do(self.weekly_portfolio_optimization)
         
         # Monthly full analysis on the first day of each month at 8 PM
-        schedule.every().month.do(self.monthly_full_analysis)
+        schedule.every().day.at("20:00").do(self.check_monthly_analysis)
         
         logger.info("Schedule setup completed")
         logger.info("Daily data collection: 18:00")

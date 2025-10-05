@@ -329,11 +329,43 @@ def create_performance_metrics():
         dbc.Row([
             dbc.Col([
                 html.H3("Rolling Sharpe Ratio"),
-                dcc.Graph(id="rolling-sharpe-chart")
+                dbc.Card([
+                    dbc.CardBody([
+                        html.Label("Select Portfolio for Rolling Sharpe Ratio:"),
+                        dcc.Dropdown(
+                            id="rolling-sharpe-portfolio-selector",
+                            placeholder="Choose a portfolio for Rolling Sharpe analysis",
+                            style={"margin-bottom": "10px"}
+                        )
+                    ])
+                ]),
+                html.Div(id="rolling-sharpe-loading-text", style={"display": "none"}, 
+                        children=html.P("Loading Rolling Sharpe Ratio data...", className="text-center text-muted")),
+                dcc.Loading(
+                    id="rolling-sharpe-loading",
+                    type="default",
+                    children=dcc.Graph(id="rolling-sharpe-chart")
+                )
             ], width=6),
             dbc.Col([
                 html.H3("Rolling Volatility"),
-                dcc.Graph(id="rolling-volatility-chart")
+                dbc.Card([
+                    dbc.CardBody([
+                        html.Label("Select Portfolio for Rolling Volatility:"),
+                        dcc.Dropdown(
+                            id="rolling-volatility-portfolio-selector",
+                            placeholder="Choose a portfolio for Rolling Volatility analysis",
+                            style={"margin-bottom": "10px"}
+                        )
+                    ])
+                ]),
+                html.Div(id="rolling-volatility-loading-text", style={"display": "none"}, 
+                        children=html.P("Loading Rolling Volatility data...", className="text-center text-muted")),
+                dcc.Loading(
+                    id="rolling-volatility-loading",
+                    type="default",
+                    children=dcc.Graph(id="rolling-volatility-chart")
+                )
             ], width=6)
         ]),
         
@@ -2268,7 +2300,8 @@ def hide_performance_loading_text(figure):
 @app.callback(
     Output("performance-comparison-chart", "figure"),
     [Input("tabs", "active_tab"),
-     Input("performance-portfolio-selector", "value")]
+     Input("performance-portfolio-selector", "value")],
+    prevent_initial_call=True
 )
 def update_performance_comparison(active_tab, selected_portfolios):
     """Update performance comparison chart using 100% real calculated data with automatic data fetching."""
@@ -2287,7 +2320,13 @@ def update_performance_comparison(active_tab, selected_portfolios):
                     if p['name'] in selected_portfolios:
                         portfolios_to_analyze.append(p)
             else:
-                portfolios_to_analyze = db_portfolios  # Analyze all if none selected
+                # Return empty figure if no portfolios selected
+                return go.Figure().add_annotation(
+                    text="Please select portfolios to compare",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5, showarrow=False,
+                    font=dict(size=16, color="gray")
+                )
             
             # Automatically fetch missing stock data for all portfolios
             if portfolios_to_analyze:
@@ -2434,9 +2473,11 @@ def update_performance_comparison(active_tab, selected_portfolios):
 # Callback for performance summary
 @app.callback(
     Output("performance-summary", "children"),
-    [Input("tabs", "active_tab")]
+    [Input("tabs", "active_tab"),
+     Input("performance-portfolio-selector", "value")],
+    prevent_initial_call=True
 )
-def update_performance_summary(active_tab):
+def update_performance_summary(active_tab, selected_portfolios):
     """Update performance summary display using 100% real calculated data with dynamic data fetching."""
     if active_tab != "performance-tab":
         return html.Div()
@@ -2446,10 +2487,24 @@ def update_performance_summary(active_tab):
     if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
         try:
             db_portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
-            if db_portfolios:
-                # Automatically fetch missing stock data for all portfolios
+            
+            # Only fetch data if portfolios are selected
+            portfolios_to_analyze = []
+            if selected_portfolios and len(selected_portfolios) > 0:
+                for p in db_portfolios:
+                    if p['name'] in selected_portfolios:
+                        portfolios_to_analyze.append(p)
+            else:
+                # Return empty summary if no portfolios selected
+                return html.Div([
+                    html.H5("Performance Summary", className="mb-3"),
+                    html.P("Please select portfolios to view performance summary", className="text-muted")
+                ])
+            
+            if portfolios_to_analyze:
+                # Automatically fetch missing stock data for selected portfolios only
                 print("Performance Summary: Fetching missing stock data...")
-                fetch_missing_stock_data_for_portfolios(db_portfolios)
+                fetch_missing_stock_data_for_portfolios(portfolios_to_analyze)
                 print("Performance Summary: Data fetching completed")
                 
                 # Calculate real performance metrics
@@ -2545,50 +2600,93 @@ def update_performance_summary(active_tab):
     
     return metric_cards
 
+# Callback to populate rolling Sharpe portfolio selector
+@app.callback(
+    Output("rolling-sharpe-portfolio-selector", "options"),
+    [Input("tabs", "active_tab")]
+)
+def populate_rolling_sharpe_selector(active_tab):
+    """Populate the rolling Sharpe portfolio selector with available portfolios."""
+    if active_tab != "performance-tab":
+        return []
+    
+    if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
+        try:
+            portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
+            options = [{"label": p["name"], "value": p["name"]} for p in portfolios]
+            return options
+        except Exception as e:
+            print(f"Error loading portfolios for rolling Sharpe selector: {e}")
+    
+    return []
+
+# Callback to populate rolling volatility portfolio selector
+@app.callback(
+    Output("rolling-volatility-portfolio-selector", "options"),
+    [Input("tabs", "active_tab")]
+)
+def populate_rolling_volatility_selector(active_tab):
+    """Populate the rolling volatility portfolio selector with available portfolios."""
+    if active_tab != "performance-tab":
+        return []
+    
+    if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
+        try:
+            portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
+            options = [{"label": p["name"], "value": p["name"]} for p in portfolios]
+            return options
+        except Exception as e:
+            print(f"Error loading portfolios for rolling volatility selector: {e}")
+    
+    return []
+
 # Callback for rolling Sharpe ratio chart
 @app.callback(
     Output("rolling-sharpe-chart", "figure"),
-    [Input("tabs", "active_tab")]
+    [Input("tabs", "active_tab"),
+     Input("rolling-sharpe-portfolio-selector", "value")]
 )
-def update_rolling_sharpe(active_tab):
+def update_rolling_sharpe(active_tab, selected_portfolio_name):
     """Update rolling Sharpe ratio chart using 100% real calculated data with dynamic data fetching."""
-    if active_tab != "performance-tab":
+    if active_tab != "performance-tab" or not selected_portfolio_name:
         return go.Figure()
     
     if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
         try:
             db_portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
             
-            # Automatically fetch missing stock data for all portfolios
-            if db_portfolios:
-                print("Rolling Sharpe: Fetching missing stock data...")
-                fetch_missing_stock_data_for_portfolios(db_portfolios)
-                print("Rolling Sharpe: Data fetching completed")
-            
-            # Find the first portfolio with available data for rolling Sharpe calculation
+            # Find the selected portfolio
             selected_portfolio = None
             for p in db_portfolios:
-                portfolio_symbols = p['symbols']
-                
-                # Check which symbols have data available after fetching
-                available_symbols = []
-                try:
-                    from src.data_access.stock_data_service import get_stock_data_service
-                    stock_service = get_stock_data_service()
-                    
-                    for symbol in portfolio_symbols:
-                        data = stock_service.get_stock_data(symbol)
-                        if data is not None and not data.empty:
-                            available_symbols.append(symbol)
-                except Exception as e:
-                    print(f"Error checking stock data availability for rolling Sharpe: {e}")
-                    continue
-                
-                if available_symbols:
+                if p['name'] == selected_portfolio_name:
                     selected_portfolio = p
                     break
             
-            if selected_portfolio:
+            if not selected_portfolio:
+                return go.Figure()
+            
+            # Automatically fetch missing stock data for the selected portfolio
+            print(f"Rolling Sharpe: Fetching missing stock data for {selected_portfolio_name}...")
+            fetch_missing_stock_data_for_portfolios([selected_portfolio])
+            print("Rolling Sharpe: Data fetching completed")
+            
+            portfolio_symbols = selected_portfolio['symbols']
+            
+            # Check which symbols have data available after fetching
+            available_symbols = []
+            try:
+                from src.data_access.stock_data_service import get_stock_data_service
+                stock_service = get_stock_data_service()
+                
+                for symbol in portfolio_symbols:
+                    data = stock_service.get_stock_data(symbol)
+                    if data is not None and not data.empty:
+                        available_symbols.append(symbol)
+            except Exception as e:
+                print(f"Error checking stock data availability for rolling Sharpe: {e}")
+                return go.Figure()
+            
+            if available_symbols:
                 try:
                     # Use dynamic date range
                     end_date = datetime.now().strftime('%Y-%m-%d')
@@ -2672,47 +2770,50 @@ def update_rolling_sharpe(active_tab):
 # Callback for rolling volatility chart
 @app.callback(
     Output("rolling-volatility-chart", "figure"),
-    [Input("tabs", "active_tab")]
+    [Input("tabs", "active_tab"),
+     Input("rolling-volatility-portfolio-selector", "value")]
 )
-def update_rolling_volatility(active_tab):
+def update_rolling_volatility(active_tab, selected_portfolio_name):
     """Update rolling volatility chart using 100% real calculated data with dynamic data fetching."""
-    if active_tab != "performance-tab":
+    if active_tab != "performance-tab" or not selected_portfolio_name:
         return go.Figure()
     
     if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
         try:
             db_portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
             
-            # Automatically fetch missing stock data for all portfolios
-            if db_portfolios:
-                print("Rolling Volatility: Fetching missing stock data...")
-                fetch_missing_stock_data_for_portfolios(db_portfolios)
-                print("Rolling Volatility: Data fetching completed")
-            
-            # Find the first portfolio with available data for rolling volatility calculation
+            # Find the selected portfolio
             selected_portfolio = None
             for p in db_portfolios:
-                portfolio_symbols = p['symbols']
-                
-                # Check which symbols have data available after fetching
-                available_symbols = []
-                try:
-                    from src.data_access.stock_data_service import get_stock_data_service
-                    stock_service = get_stock_data_service()
-                    
-                    for symbol in portfolio_symbols:
-                        data = stock_service.get_stock_data(symbol)
-                        if data is not None and not data.empty:
-                            available_symbols.append(symbol)
-                except Exception as e:
-                    print(f"Error checking stock data availability for rolling volatility: {e}")
-                    continue
-                
-                if available_symbols:
+                if p['name'] == selected_portfolio_name:
                     selected_portfolio = p
                     break
             
-            if selected_portfolio:
+            if not selected_portfolio:
+                return go.Figure()
+            
+            # Automatically fetch missing stock data for the selected portfolio
+            print(f"Rolling Volatility: Fetching missing stock data for {selected_portfolio_name}...")
+            fetch_missing_stock_data_for_portfolios([selected_portfolio])
+            print("Rolling Volatility: Data fetching completed")
+            
+            portfolio_symbols = selected_portfolio['symbols']
+            
+            # Check which symbols have data available after fetching
+            available_symbols = []
+            try:
+                from src.data_access.stock_data_service import get_stock_data_service
+                stock_service = get_stock_data_service()
+                
+                for symbol in portfolio_symbols:
+                    data = stock_service.get_stock_data(symbol)
+                    if data is not None and not data.empty:
+                        available_symbols.append(symbol)
+            except Exception as e:
+                print(f"Error checking stock data availability for rolling volatility: {e}")
+                return go.Figure()
+            
+            if available_symbols:
                 try:
                     # Use dynamic date range
                     end_date = datetime.now().strftime('%Y-%m-%d')
@@ -2790,6 +2891,54 @@ def update_rolling_volatility(active_tab):
     )
     
     return fig
+
+# Callback to show/hide rolling Sharpe loading text
+@app.callback(
+    Output("rolling-sharpe-loading-text", "style"),
+    [Input("rolling-sharpe-portfolio-selector", "value"),
+     Input("tabs", "active_tab")]
+)
+def show_rolling_sharpe_loading_text(selected_portfolio, active_tab):
+    """Show loading text when portfolio selection changes or tab is activated."""
+    if active_tab != "performance-tab":
+        return {"display": "none"}
+    if selected_portfolio:
+        return {"display": "block"}
+    return {"display": "none"}
+
+# Callback to hide rolling Sharpe loading text when chart updates
+@app.callback(
+    Output("rolling-sharpe-loading-text", "style", allow_duplicate=True),
+    [Input("rolling-sharpe-chart", "figure")],
+    prevent_initial_call=True
+)
+def hide_rolling_sharpe_loading_text(figure):
+    """Hide loading text when chart is updated."""
+    return {"display": "none"}
+
+# Callback to show/hide rolling volatility loading text
+@app.callback(
+    Output("rolling-volatility-loading-text", "style"),
+    [Input("rolling-volatility-portfolio-selector", "value"),
+     Input("tabs", "active_tab")]
+)
+def show_rolling_volatility_loading_text(selected_portfolio, active_tab):
+    """Show loading text when portfolio selection changes or tab is activated."""
+    if active_tab != "performance-tab":
+        return {"display": "none"}
+    if selected_portfolio:
+        return {"display": "block"}
+    return {"display": "none"}
+
+# Callback to hide rolling volatility loading text when chart updates
+@app.callback(
+    Output("rolling-volatility-loading-text", "style", allow_duplicate=True),
+    [Input("rolling-volatility-chart", "figure")],
+    prevent_initial_call=True
+)
+def hide_rolling_volatility_loading_text(figure):
+    """Hide loading text when chart is updated."""
+    return {"display": "none"}
 
 # Callback for returns distribution chart
 @app.callback(
@@ -2876,7 +3025,8 @@ def update_performance_portfolio_selector(active_tab):
     Output("performance-statistics", "children"),
     [Input("tabs", "active_tab"),
      Input("performance-portfolio-selector", "value"),
-     Input("performance-time-period", "value")]
+     Input("performance-time-period", "value")],
+    prevent_initial_call=True
 )
 def update_performance_statistics(active_tab, selected_portfolios, time_period):
     """Update performance statistics display using 100% real calculated data with dynamic data fetching."""
@@ -3104,13 +3254,14 @@ def update_performance_comparison_enhanced(active_tab, selected_portfolios, time
         elif benchmark == "DIA":
             portfolios["Dow Jones"] = np.random.normal(0.009, 0.04, len(dates)).cumsum()
     
-    # Fallback to sample data if no portfolios selected
+    # Return empty figure if no portfolios selected
     if not portfolios:
-        portfolios = {
-            'Tech Growth': np.random.normal(0.015, 0.08, len(dates)).cumsum(),
-            'Conservative': np.random.normal(0.008, 0.04, len(dates)).cumsum(),
-            'S&P 500': np.random.normal(0.010, 0.05, len(dates)).cumsum()
-        }
+        return go.Figure().add_annotation(
+            text="Please select portfolios to compare",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=16, color="gray")
+        )
     
     fig = go.Figure()
     
