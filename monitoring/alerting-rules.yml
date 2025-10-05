@@ -1,0 +1,142 @@
+groups:
+  - name: quant-finance-alerts
+    rules:
+      # High CPU Usage Alert
+      - alert: HighCPUUsage
+        expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is above 80% for more than 5 minutes on {{ $labels.instance }}"
+
+      # High Memory Usage Alert
+      - alert: HighMemoryUsage
+        expr: 100 - ((node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100) > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is above 85% for more than 5 minutes on {{ $labels.instance }}"
+
+      # Database Connection Issues
+      - alert: DatabaseConnectionHigh
+        expr: pg_stat_database_numbackends{datname="quant_finance"} > 20
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High database connections"
+          description: "Database has more than 20 active connections for more than 2 minutes"
+
+      # Redis Connection Issues
+      - alert: RedisConnectionHigh
+        expr: redis_connected_clients > 50
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Redis connections"
+          description: "Redis has more than 50 connected clients for more than 2 minutes"
+
+      # Low Cache Hit Rate
+      - alert: LowCacheHitRate
+        expr: redis_keyspace_hits_total / (redis_keyspace_hits_total + redis_keyspace_misses_total) * 100 < 70
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low Redis cache hit rate"
+          description: "Redis cache hit rate is below 70% for more than 10 minutes"
+
+      # Application Errors
+      - alert: HighErrorRate
+        expr: rate(quant_finance_errors_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate detected"
+          description: "Application error rate is above 0.1 errors per second for more than 2 minutes"
+
+      # Portfolio Calculation Failures
+      - alert: PortfolioCalculationFailures
+        expr: rate(quant_finance_portfolio_analytics_calculations_total{calculation_type="error"}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Portfolio calculation failures"
+          description: "Portfolio calculation failure rate is above 0.05 failures per second"
+
+      # Stock Data Fetch Failures
+      - alert: StockDataFetchFailures
+        expr: rate(quant_finance_stock_data_fetches_total{status="error"}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Stock data fetch failures"
+          description: "Stock data fetch failure rate is above 0.1 failures per second"
+
+      # Slow Database Queries
+      - alert: SlowDatabaseQueries
+        expr: histogram_quantile(0.95, rate(quant_finance_db_query_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow database queries"
+          description: "95th percentile of database query duration is above 2 seconds"
+
+      # Slow Portfolio Calculations
+      - alert: SlowPortfolioCalculations
+        expr: histogram_quantile(0.95, rate(quant_finance_portfolio_analytics_duration_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow portfolio calculations"
+          description: "95th percentile of portfolio calculation duration is above 10 seconds"
+
+      # Container Memory Usage
+      - alert: ContainerHighMemoryUsage
+        expr: container_memory_usage_bytes{name=~"quant-finance.*"} / container_spec_memory_limit_bytes * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High container memory usage"
+          description: "Container {{ $labels.name }} memory usage is above 80%"
+
+      # Container CPU Usage
+      - alert: ContainerHighCPUUsage
+        expr: rate(container_cpu_usage_seconds_total{name=~"quant-finance.*"}[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High container CPU usage"
+          description: "Container {{ $labels.name }} CPU usage is above 80%"
+
+      # Service Down
+      - alert: ServiceDown
+        expr: up{job=~"quant-finance.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service is down"
+          description: "Service {{ $labels.job }} has been down for more than 1 minute"
+
+      # Disk Space Low
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Low disk space"
+          description: "Disk space is below 10% on {{ $labels.instance }}"

@@ -9,6 +9,7 @@ services:
       - "9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./alerting-rules.yml:/etc/prometheus/alerting-rules.yml
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -20,6 +21,7 @@ services:
     restart: unless-stopped
     networks:
       - monitoring
+      - quant-finance-pipeline_default
 
   # Grafana - Visualization and dashboards
   grafana:
@@ -89,6 +91,18 @@ services:
     networks:
       - monitoring
 
+  # Redis Exporter - Redis metrics
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: redis-exporter
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://host.docker.internal:6379
+    restart: unless-stopped
+    networks:
+      - monitoring
+
   # Alertmanager - Alert handling
   alertmanager:
     image: prom/alertmanager:latest
@@ -114,3 +128,5 @@ volumes:
 networks:
   monitoring:
     driver: bridge
+  quant-finance-pipeline_default:
+    external: true

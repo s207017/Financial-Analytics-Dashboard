@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quant-finance-dashboard
+  namespace: quant-finance-pipeline
+  labels:
+    app: quant-finance-dashboard
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: quant-finance-dashboard
+  template:
+    metadata:
+      labels:
+        app: quant-finance-dashboard
+    spec:
+      containers:
+      - name: dashboard
+        image: quant-finance-pipeline-dashboard:latest
+        ports:
+        - containerPort: 8050
+          name: dashboard-port
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_URL
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_PORT
+        - name: REDIS_DB
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_DB
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8050
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8050
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      initContainers:
+      - name: wait-for-db
+        image: postgres:15
+        command: ['sh', '-c', 'until pg_isready -h postgres-service -p 5432; do echo waiting for postgres; sleep 2; done;']
+      - name: wait-for-redis
+        image: redis:7-alpine
+        command: ['sh', '-c', 'until redis-cli -h redis-service -p 6379 ping; do echo waiting for redis; sleep 2; done;']
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard-service
+  namespace: quant-finance-pipeline
+  labels:
+    app: quant-finance-dashboard
+spec:
+  selector:
+    app: quant-finance-dashboard
+  ports:
+  - name: dashboard-port
+    port: 8051
+    targetPort: 8050
+  type: ClusterIP

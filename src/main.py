@@ -32,6 +32,14 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
+# Start metrics exporter
+try:
+    from monitoring.metrics_exporter import start_metrics_exporter
+    start_metrics_exporter(port=8000, collection_interval=30)
+    logging.info("Metrics exporter started on port 8000")
+except Exception as e:
+    logging.warning(f"Failed to start metrics exporter: {e}")
 logger = logging.getLogger(__name__)
 
 

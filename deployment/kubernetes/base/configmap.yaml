@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: quant-finance-pipeline
+data:
+  DATABASE_URL: "postgresql://postgres:password@postgres-service:5432/quant_finance"
+  REDIS_URL: "redis://redis-service:6379"
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  ENVIRONMENT: "production"
+  # API Keys (these should be moved to secrets in production)
+  ALPHA_VANTAGE_API_KEY: "demo"
+  FRED_API_KEY: "demo"
+  QUANDL_API_KEY: "demo"

@@ -1,0 +1,31 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: quant-finance-pipeline
+
+resources:
+- ../../base
+
+patchesStrategicMerge:
+- configmap-patch.yaml
+- deployment-patch.yaml
+
+configMapGenerator:
+- name: app-config
+  literals:
+  - ENVIRONMENT=production
+  - LOG_LEVEL=INFO
+
+replicas:
+- name: quant-finance-app
+  count: 3
+- name: quant-finance-dashboard
+  count: 3
+
+images:
+- name: quant-finance-pipeline-app
+  newTag: v1.0.0
+- name: quant-finance-pipeline-dashboard
+  newTag: v1.0.0
+- name: quant-finance-pipeline-scheduler
+  newTag: v1.0.0

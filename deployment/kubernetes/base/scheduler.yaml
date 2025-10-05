@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quant-finance-scheduler
+  namespace: quant-finance-pipeline
+  labels:
+    app: quant-finance-scheduler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: quant-finance-scheduler
+  template:
+    metadata:
+      labels:
+        app: quant-finance-scheduler
+    spec:
+      containers:
+      - name: scheduler
+        image: quant-finance-pipeline-scheduler:latest
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_URL
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_PORT
+        - name: REDIS_DB
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_DB
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: ENVIRONMENT
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+      initContainers:
+      - name: wait-for-db
+        image: postgres:15
+        command: ['sh', '-c', 'until pg_isready -h postgres-service -p 5432; do echo waiting for postgres; sleep 2; done;']
+      - name: wait-for-redis
+        image: redis:7-alpine
+        command: ['sh', '-c', 'until redis-cli -h redis-service -p 6379 ping; do echo waiting for redis; sleep 2; done;']

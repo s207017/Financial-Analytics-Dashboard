@@ -3,8 +3,7 @@ global:
   evaluation_interval: 15s
 
 rule_files:
-  # - "first_rules.yml"
-  # - "second_rules.yml"
+  - "alerting-rules.yml"
 
 scrape_configs:
   # Prometheus itself
@@ -15,21 +14,34 @@ scrape_configs:
   # Quantitative Finance Pipeline
   - job_name: 'quant-finance-pipeline'
     static_configs:
-      - targets: ['host.docker.internal:8000']
+      - targets: ['quant-finance-app:8000']
     metrics_path: '/metrics'
     scrape_interval: 10s
 
   # PostgreSQL Database
   - job_name: 'postgres'
     static_configs:
-      - targets: ['localhost:9187']
+      - targets: ['postgres-exporter:9187']
 
   # Node Exporter (System Metrics)
   - job_name: 'node-exporter'
     static_configs:
-      - targets: ['localhost:9100']
+      - targets: ['node-exporter:9100']
 
   # cAdvisor (Container Metrics)
   - job_name: 'cadvisor'
     static_configs:
-      - targets: ['localhost:8080']
+      - targets: ['cadvisor:8080']
+
+  # Redis Exporter
+  - job_name: 'redis-exporter'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 10s
+
+  # Custom Application Metrics
+  - job_name: 'quant-finance-metrics'
+    static_configs:
+      - targets: ['quant-finance-app:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
