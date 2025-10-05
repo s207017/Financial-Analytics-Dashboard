@@ -68,8 +68,8 @@ docker-compose exec app python scripts/setup_portfolio_tables.py
 - **Portfolio Optimization**: Modern Portfolio Theory implementation
 - **Risk Metrics**: Sharpe ratio, VaR, beta calculations
 - **Machine Learning**: Regression and clustering analysis
-- **Cloud Deployment**: AWS integration with Docker and Kubernetes
-- **CI/CD**: GitHub Actions for automated testing and deployment
+- **Cloud Deployment**: AWS integration with Docker and Kubernetes orchestration
+- **CI/CD**: GitHub Actions for automated testing and Kubernetes deployment
 
 ## 🏗️ Project Structure
 
@@ -93,9 +93,9 @@ Financial-Analytics-Dashboard/
 └── notebooks/           # Jupyter notebooks for analysis
 ```
 
-## 🐳 Docker Services
+## 🐳 Docker & Kubernetes Services
 
-The application runs as a multi-service Docker Compose setup:
+The application runs as a multi-service Docker Compose setup with Kubernetes orchestration:
 
 | Service | Port | Description |
 |---------|------|-------------|
@@ -132,7 +132,7 @@ The application runs as a multi-service Docker Compose setup:
 
 ## 🔧 Development Setup (Alternative)
 
-If you prefer to run without Docker:
+If you prefer to run without Docker or Kubernetes:
 
 ### Prerequisites
 - Python 3.8+
@@ -156,10 +156,10 @@ python -m src.visualization.dash_app.simple_app
 
 ### Docker Compose (Recommended)
 ```bash
-# Production deployment
+# Production deployment with Docker Compose
 docker-compose -f docker-compose.yml up -d
 
-# With monitoring stack
+# With monitoring stack and Kubernetes-ready setup
 docker-compose -f docker-compose.yml -f monitoring/docker-compose.monitoring.yml up -d
 ```
 
@@ -201,7 +201,7 @@ cd deployment/kubernetes
 
 ### AWS Lambda
 ```bash
-# Deploy serverless functions
+# Deploy serverless functions with Kubernetes integration
 python scripts/deploy_lambda.py
 ```
 
@@ -279,7 +279,7 @@ docker-compose logs postgres
 
 **Missing dependencies:**
 ```bash
-# Rebuild containers
+# Rebuild containers for Docker and Kubernetes
 docker-compose down
 docker-compose build --no-cache
 docker-compose up -d
@@ -287,7 +287,7 @@ docker-compose up -d
 
 ### Reset Everything
 ```bash
-# Complete reset
+# Complete reset for Docker and Kubernetes
 docker-compose down -v
 docker system prune -f
 docker-compose up -d

@@ -2,7 +2,7 @@
 
 ## Architecture Overview
 
-This quantitative finance pipeline implements a modern microservices architecture with clear separation of concerns, following industry best practices for scalability, maintainability, and performance.
+This quantitative finance pipeline implements a modern microservices architecture with Kubernetes orchestration, following industry best practices for scalability, maintainability, and performance.
 
 ## System Architecture
 
@@ -23,6 +23,7 @@ Services communicate through:
 - **Cache layer**: Redis for high-speed data access
 - **Environment variables**: Configuration management
 - **Health checks**: Service availability monitoring
+- **Kubernetes DNS**: Automatic service discovery and routing
 
 ## Database Design
 
@@ -420,7 +421,7 @@ kubectl top pods -n quant-finance-pipeline
 
 ### 1. Database Optimizations
 
-- **Connection pooling**: SQLAlchemy engine with connection pooling
+- **Connection pooling**: SQLAlchemy engine with Kubernetes-aware connection pooling
 - **Prepared statements**: Parameterized queries to prevent SQL injection
 - **Indexing**: Proper indexes on frequently queried columns
 
@@ -428,7 +429,7 @@ kubectl top pods -n quant-finance-pipeline
 
 - **Intelligent TTL**: Different cache durations based on data volatility
 - **Cache warming**: Pre-populate cache with frequently accessed data
-- **Cache invalidation**: Smart cache invalidation strategies
+- **Cache invalidation**: Smart cache invalidation strategies with Kubernetes integration
 
 ### 3. API Optimizations
 
