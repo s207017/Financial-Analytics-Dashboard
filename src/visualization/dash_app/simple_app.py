@@ -229,17 +229,68 @@ def create_portfolio_overview():
 def create_risk_analysis():
     """Create risk analysis tab content."""
     return dbc.Container([
+        # Controls Row
         dbc.Row([
             dbc.Col([
-                html.H3("Risk Metrics Over Time"),
-                dcc.Graph(id="risk-metrics-chart")
-            ], width=8),
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H5("Risk Analysis Controls", className="mb-3"),
+                        dbc.Row([
+                            dbc.Col([
+                                html.Label("Portfolio Selection:"),
+                                dcc.Dropdown(
+                                    id="risk-portfolio-selector",
+                                    multi=True,
+                                    placeholder="Select portfolios to analyze risk..."
+                                )
+                            ], width=12)
+                        ])
+                    ])
+                ])
+            ], width=12)
+        ], className="mb-4"),
+        
+        # Risk Summary Row
+        dbc.Row([
             dbc.Col([
                 html.H3("Risk Summary"),
                 html.Div(id="risk-summary")
-            ], width=4)
-        ]),
+            ], width=12)
+        ], className="mb-4"),
         
+        # Charts Row 1
+        dbc.Row([
+            dbc.Col([
+                html.H3("Risk Metrics Over Time"),
+                dcc.Loading(
+                    id="loading-risk-metrics",
+                    type="default",
+                    children=html.Div([
+                        html.Div("Loading risk metrics...", id="risk-metrics-loading-text", style={"display": "none"}),
+                        dcc.Graph(id="risk-metrics-chart")
+                    ])
+                )
+            ], width=9),
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader("Select Metric"),
+                    dbc.CardBody([
+                        dcc.RadioItems(
+                            id="risk-metric-selector",
+                            options=[
+                                {"label": "Sharpe Ratio", "value": "sharpe"},
+                                {"label": "Volatility", "value": "volatility"},
+                                {"label": "VaR (95%)", "value": "var_95"}
+                            ],
+                            value="sharpe",  # Default to Sharpe
+                            className="mt-2"
+                        )
+                    ])
+                ])
+            ], width=3)
+        ], className="mb-4"),
+        
+        # Charts Row 2
         dbc.Row([
             dbc.Col([
                 html.H3("Value at Risk (VaR)"),
@@ -958,180 +1009,521 @@ def update_optimization_results(n_clicks, target_return):
     
     return result_cards
 
+# Callback for risk portfolio selector
+@app.callback(
+    Output("risk-portfolio-selector", "options"),
+    [Input("tabs", "active_tab")]
+)
+def update_risk_portfolio_selector(active_tab):
+    """Update risk portfolio selector options."""
+    if active_tab != "risk-tab":
+        return []
+    
+    try:
+        if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
+            db_portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
+            options = []
+            for p in db_portfolios:
+                options.append({
+                    "label": f"{p['name']} ({p['strategy']})",
+                    "value": p['name']
+                })
+            return options
+        else:
+            # Fallback options
+            return [
+                {"label": "Tech Growth Portfolio (Growth)", "value": "Tech Growth Portfolio"},
+                {"label": "Conservative Income (Income)", "value": "Conservative Income"},
+                {"label": "Balanced Portfolio (Balanced)", "value": "Balanced Portfolio"},
+                {"label": "Dividend Growth Portfolio (dividend_growth)", "value": "Dividend Growth Portfolio"},
+                {"label": "Emerging Tech Portfolio (growth)", "value": "Emerging Tech Portfolio"}
+            ]
+    except Exception as e:
+        print(f"Error loading portfolio options for risk selector: {e}")
+        return []
+
 # Callback for risk metrics chart
 @app.callback(
     Output("risk-metrics-chart", "figure"),
-    [Input("tabs", "active_tab")]
+    [Input("tabs", "active_tab"),
+     Input("risk-portfolio-selector", "value"),
+     Input("risk-metric-selector", "value")],
+    prevent_initial_call=True
 )
-def update_risk_metrics_chart(active_tab):
-    """Update risk metrics over time chart."""
+def update_risk_metrics_chart(active_tab, selected_portfolios, selected_metric):
+    """Update risk metrics over time chart using real portfolio data."""
     if active_tab != "risk-tab":
         return go.Figure()
     
-    # Generate sample risk metrics data
-    dates = pd.date_range(start='2023-01-01', end='2024-01-01', freq='M')
-    np.random.seed(42)
+    if not selected_portfolios or len(selected_portfolios) == 0:
+        return go.Figure().add_annotation(
+            text="Please select portfolios to analyze risk metrics",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=16, color="gray")
+        )
     
-    # Generate realistic risk metrics
-    sharpe_ratio = 0.5 + 0.3 * np.sin(np.arange(len(dates)) * 0.5) + np.random.normal(0, 0.1, len(dates))
-    volatility = 0.15 + 0.05 * np.sin(np.arange(len(dates)) * 0.3) + np.random.normal(0, 0.02, len(dates))
-    var_95 = -0.02 - 0.01 * np.sin(np.arange(len(dates)) * 0.4) + np.random.normal(0, 0.005, len(dates))
+    if not selected_metric:
+        return go.Figure().add_annotation(
+            text="Please select a risk metric to display",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=16, color="gray")
+        )
     
     fig = go.Figure()
     
-    fig.add_trace(go.Scatter(
-        x=dates, y=sharpe_ratio,
-        mode='lines+markers',
-        name='Sharpe Ratio',
-        line=dict(color='blue', width=2)
-    ))
-    
-    fig.add_trace(go.Scatter(
-        x=dates, y=volatility,
-        mode='lines+markers',
-        name='Volatility',
-        line=dict(color='red', width=2),
-        yaxis='y2'
-    ))
-    
-    fig.add_trace(go.Scatter(
-        x=dates, y=var_95,
-        mode='lines+markers',
-        name='VaR (95%)',
-        line=dict(color='orange', width=2),
-        yaxis='y3'
-    ))
-    
-    fig.update_layout(
-        title="Risk Metrics Over Time",
-        xaxis_title="Date",
-        yaxis=dict(title="Sharpe Ratio", side="left"),
-        yaxis2=dict(title="Volatility", side="right", overlaying="y"),
-        yaxis3=dict(title="VaR (95%)", side="right", overlaying="y", position=0.85),
-        hovermode='x unified'
-    )
+    if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
+        try:
+            db_portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
+            
+            # Filter selected portfolios
+            portfolios_to_analyze = []
+            for p in db_portfolios:
+                if p['name'] in selected_portfolios:
+                    portfolios_to_analyze.append(p)
+            
+            if not portfolios_to_analyze:
+                return go.Figure().add_annotation(
+                    text="No valid portfolios selected",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5, showarrow=False,
+                    font=dict(size=16, color="gray")
+                )
+            
+            # Fetch missing stock data for selected portfolios
+            fetch_missing_stock_data_for_portfolios(portfolios_to_analyze)
+            
+            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
+            
+            for i, portfolio in enumerate(portfolios_to_analyze):
+                try:
+                    # Calculate portfolio analytics
+                    end_date = datetime.now().strftime('%Y-%m-%d')
+                    start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                    
+                    analytics = PORTFOLIO_SERVICE.calculate_portfolio_analytics(
+                        symbols=portfolio['symbols'],
+                        weights=portfolio['weights'],
+                        start_date=start_date,
+                        end_date=end_date
+                    )
+                    
+                    if analytics and 'returns' in analytics:
+                        returns = analytics['returns']
+                        
+                        # Ensure returns is a pandas Series
+                        if not isinstance(returns, pd.Series):
+                            returns = pd.Series(returns)
+                        
+                        # Calculate rolling metrics
+                        window = 30  # 30-day rolling window
+                        rolling_sharpe = returns.rolling(window=window).mean() / returns.rolling(window=window).std() * np.sqrt(252)
+                        rolling_volatility = returns.rolling(window=window).std() * np.sqrt(252)
+                        rolling_var = returns.rolling(window=window).quantile(0.05)
+                        
+                        # Remove NaN values
+                        valid_idx = ~(rolling_sharpe.isna() | rolling_volatility.isna() | rolling_var.isna())
+                        dates = returns.index[valid_idx]
+                        
+                        color = colors[i % len(colors)]
+                        
+                        # Add trace based on selected metric
+                        if selected_metric == "sharpe":
+                            fig.add_trace(go.Scatter(
+                                x=dates, y=rolling_sharpe[valid_idx],
+                                mode='lines+markers',
+                                name=f'{portfolio["name"]} - Sharpe',
+                                line=dict(color=color, width=2),
+                                yaxis='y'
+                            ))
+                        elif selected_metric == "volatility":
+                            fig.add_trace(go.Scatter(
+                                x=dates, y=rolling_volatility[valid_idx],
+                                mode='lines+markers',
+                                name=f'{portfolio["name"]} - Volatility',
+                                line=dict(color=color, width=2, dash='dash'),
+                                yaxis='y'
+                            ))
+                        elif selected_metric == "var_95":
+                            fig.add_trace(go.Scatter(
+                                x=dates, y=rolling_var[valid_idx],
+                                mode='lines+markers',
+                                name=f'{portfolio["name"]} - VaR (95%)',
+                                line=dict(color=color, width=2, dash='dot'),
+                                yaxis='y'
+                            ))
+                        
+                except Exception as e:
+                    print(f"Error calculating risk metrics for {portfolio['name']}: {e}")
+                    continue
+            
+            # Dynamic layout based on selected metric
+            layout_dict = {
+                "title": f"Risk Metrics Over Time - {selected_metric.title().replace('_', ' ')} (Real Data)",
+                "xaxis_title": "Date",
+                "hovermode": "x unified",
+                "height": 500
+            }
+            
+            # Add y-axis based on selected metric
+            if selected_metric == "sharpe":
+                layout_dict["yaxis"] = dict(title="Sharpe Ratio", side="left")
+            elif selected_metric == "volatility":
+                layout_dict["yaxis"] = dict(title="Volatility", side="left")
+            elif selected_metric == "var_95":
+                layout_dict["yaxis"] = dict(title="VaR (95%)", side="left")
+            
+            fig.update_layout(**layout_dict)
+            
+        except Exception as e:
+            print(f"Error in risk metrics chart: {e}")
+            return go.Figure().add_annotation(
+                text=f"Error loading risk metrics: {str(e)}",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=16, color="red")
+            )
     
     return fig
+
+# Callback to show/hide risk metrics loading text
+@app.callback(
+    Output("risk-metrics-loading-text", "style"),
+    [Input("risk-portfolio-selector", "value"),
+     Input("risk-metric-selector", "value")],
+    prevent_initial_call=True
+)
+def show_risk_metrics_loading_text(selected_portfolios, selected_metric):
+    """Show loading text when portfolios or metric selection changes."""
+    if selected_portfolios and selected_metric:
+        return {"display": "block", "text-align": "center", "margin": "10px"}
+    return {"display": "none"}
 
 # Callback for risk summary
 @app.callback(
     Output("risk-summary", "children"),
-    [Input("tabs", "active_tab")]
+    [Input("tabs", "active_tab"),
+     Input("risk-portfolio-selector", "value")],
+    prevent_initial_call=True
 )
-def update_risk_summary(active_tab):
-    """Update risk summary display."""
+def update_risk_summary(active_tab, selected_portfolios):
+    """Update risk summary display using real portfolio data."""
     if active_tab != "risk-tab":
         return html.Div()
     
-    # Sample risk metrics
-    risk_metrics = [
-        {"label": "Current Sharpe Ratio", "value": "0.83", "color": "success"},
-        {"label": "Portfolio Volatility", "value": "18.3%", "color": "warning"},
-        {"label": "VaR (95%)", "value": "-2.1%", "color": "danger"},
-        {"label": "VaR (99%)", "value": "-3.2%", "color": "danger"},
-        {"label": "Max Drawdown", "value": "-8.7%", "color": "danger"},
-        {"label": "Beta", "value": "1.12", "color": "info"}
-    ]
+    if not selected_portfolios or len(selected_portfolios) == 0:
+        return html.Div([
+            html.H5("Risk Summary", className="mb-3"),
+            html.P("Please select portfolios to view risk summary", className="text-muted")
+        ])
     
-    metric_cards = []
-    for metric in risk_metrics:
-        metric_cards.append(
-            dbc.Card([
-                dbc.CardBody([
-                    html.H5(metric["value"], className=f"text-{metric['color']}"),
-                    html.P(metric["label"], className="mb-0")
+    if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
+        try:
+            db_portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
+            
+            # Filter selected portfolios
+            portfolios_to_analyze = []
+            for p in db_portfolios:
+                if p['name'] in selected_portfolios:
+                    portfolios_to_analyze.append(p)
+            
+            if not portfolios_to_analyze:
+                return html.Div([
+                    html.H5("Risk Summary", className="mb-3"),
+                    html.P("No valid portfolios selected", className="text-muted")
                 ])
-            ], className="mb-2")
-        )
+            
+            # Fetch missing stock data for selected portfolios
+            fetch_missing_stock_data_for_portfolios(portfolios_to_analyze)
+            
+            summary_cards = []
+            
+            for portfolio in portfolios_to_analyze:
+                try:
+                    # Calculate portfolio analytics
+                    end_date = datetime.now().strftime('%Y-%m-%d')
+                    start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                    
+                    analytics = PORTFOLIO_SERVICE.calculate_portfolio_analytics(
+                        symbols=portfolio['symbols'],
+                        weights=portfolio['weights'],
+                        start_date=start_date,
+                        end_date=end_date
+                    )
+                    
+                    if analytics:
+                        # Create portfolio-specific risk summary
+                        portfolio_cards = []
+                        
+                        # Sharpe Ratio
+                        sharpe = analytics.get('sharpe_ratio', 0)
+                        sharpe_color = "success" if sharpe > 1 else "warning" if sharpe > 0 else "danger"
+                        portfolio_cards.append(
+                            dbc.Card([
+                                dbc.CardBody([
+                                    html.H6(f"{portfolio['name']}", className="text-primary mb-2"),
+                                    html.H5(f"{sharpe:.2f}", className=f"text-{sharpe_color}"),
+                                    html.P("Sharpe Ratio", className="mb-1 text-muted small"),
+                                    html.H5(f"{analytics.get('portfolio_volatility', 0)*100:.1f}%", className="text-warning"),
+                                    html.P("Volatility", className="mb-1 text-muted small"),
+                                    html.H5(f"{analytics.get('var_95', 0)*100:.1f}%", className="text-danger"),
+                                    html.P("VaR (95%)", className="mb-1 text-muted small"),
+                                    html.H5(f"{analytics.get('max_drawdown', 0)*100:.1f}%", className="text-danger"),
+                                    html.P("Max Drawdown", className="mb-0 text-muted small")
+                                ])
+                            ], className="mb-3")
+                        )
+                        
+                        summary_cards.extend(portfolio_cards)
+                        
+                except Exception as e:
+                    print(f"Error calculating risk summary for {portfolio['name']}: {e}")
+                    continue
+            
+            if not summary_cards:
+                return html.Div([
+                    html.H5("Risk Summary", className="mb-3"),
+                    html.P("Error calculating risk metrics", className="text-danger")
+                ])
+            
+            return summary_cards
+            
+        except Exception as e:
+            print(f"Error in risk summary: {e}")
+            return html.Div([
+                html.H5("Risk Summary", className="mb-3"),
+                html.P(f"Error loading risk summary: {str(e)}", className="text-danger")
+            ])
     
-    return metric_cards
+    return html.Div([
+        html.H5("Risk Summary", className="mb-3"),
+        html.P("Database not available", className="text-muted")
+    ])
 
 # Callback for VaR chart
 @app.callback(
     Output("var-chart", "figure"),
-    [Input("tabs", "active_tab")]
+    [Input("tabs", "active_tab"),
+     Input("risk-portfolio-selector", "value")],
+    prevent_initial_call=True
 )
-def update_var_chart(active_tab):
-    """Update Value at Risk chart."""
+def update_var_chart(active_tab, selected_portfolios):
+    """Update Value at Risk chart using real portfolio data."""
     if active_tab != "risk-tab":
         return go.Figure()
     
-    # Generate sample VaR data
-    dates = pd.date_range(start='2023-01-01', end='2024-01-01', freq='W')
-    np.random.seed(42)
-    
-    # Generate realistic VaR data
-    var_95 = -0.02 + 0.01 * np.sin(np.arange(len(dates)) * 0.3) + np.random.normal(0, 0.005, len(dates))
-    var_99 = -0.03 + 0.015 * np.sin(np.arange(len(dates)) * 0.3) + np.random.normal(0, 0.008, len(dates))
+    if not selected_portfolios or len(selected_portfolios) == 0:
+        return go.Figure().add_annotation(
+            text="Please select portfolios to analyze VaR",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=16, color="gray")
+        )
     
     fig = go.Figure()
     
-    fig.add_trace(go.Scatter(
-        x=dates, y=var_95,
-        mode='lines+markers',
-        name='VaR (95%)',
-        line=dict(color='red', width=2),
-        fill='tonexty'
-    ))
-    
-    fig.add_trace(go.Scatter(
-        x=dates, y=var_99,
-        mode='lines+markers',
-        name='VaR (99%)',
-        line=dict(color='darkred', width=2),
-        fill='tozeroy'
-    ))
-    
-    fig.update_layout(
-        title="Value at Risk Over Time",
-        xaxis_title="Date",
-        yaxis_title="VaR",
-        yaxis=dict(tickformat='.1%'),
-        hovermode='x unified'
-    )
+    if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
+        try:
+            db_portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
+            
+            # Filter selected portfolios
+            portfolios_to_analyze = []
+            for p in db_portfolios:
+                if p['name'] in selected_portfolios:
+                    portfolios_to_analyze.append(p)
+            
+            if not portfolios_to_analyze:
+                return go.Figure().add_annotation(
+                    text="No valid portfolios selected",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5, showarrow=False,
+                    font=dict(size=16, color="gray")
+                )
+            
+            # Fetch missing stock data for selected portfolios
+            fetch_missing_stock_data_for_portfolios(portfolios_to_analyze)
+            
+            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
+            
+            for i, portfolio in enumerate(portfolios_to_analyze):
+                try:
+                    # Calculate portfolio analytics
+                    end_date = datetime.now().strftime('%Y-%m-%d')
+                    start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                    
+                    analytics = PORTFOLIO_SERVICE.calculate_portfolio_analytics(
+                        symbols=portfolio['symbols'],
+                        weights=portfolio['weights'],
+                        start_date=start_date,
+                        end_date=end_date
+                    )
+                    
+                    if analytics and 'returns' in analytics:
+                        returns = analytics['returns']
+                        
+                        # Ensure returns is a pandas Series
+                        if not isinstance(returns, pd.Series):
+                            returns = pd.Series(returns)
+                        
+                        # Calculate rolling VaR
+                        window = 30  # 30-day rolling window
+                        rolling_var_95 = returns.rolling(window=window).quantile(0.05)
+                        rolling_var_99 = returns.rolling(window=window).quantile(0.01)
+                        
+                        # Remove NaN values
+                        valid_idx = ~(rolling_var_95.isna() | rolling_var_99.isna())
+                        dates = returns.index[valid_idx]
+                        
+                        color = colors[i % len(colors)]
+                        
+                        # Add VaR 95% trace
+                        fig.add_trace(go.Scatter(
+                            x=dates, y=rolling_var_95[valid_idx],
+                            mode='lines+markers',
+                            name=f'{portfolio["name"]} - VaR (95%)',
+                            line=dict(color=color, width=2),
+                            fill='tonexty'
+                        ))
+                        
+                        # Add VaR 99% trace
+                        fig.add_trace(go.Scatter(
+                            x=dates, y=rolling_var_99[valid_idx],
+                            mode='lines+markers',
+                            name=f'{portfolio["name"]} - VaR (99%)',
+                            line=dict(color=color, width=2, dash='dash'),
+                            fill='tozeroy'
+                        ))
+                        
+                except Exception as e:
+                    print(f"Error calculating VaR for {portfolio['name']}: {e}")
+                    continue
+            
+            fig.update_layout(
+                title="Value at Risk Over Time (Real Data)",
+                xaxis_title="Date",
+                yaxis_title="VaR",
+                yaxis=dict(tickformat='.1%'),
+                hovermode='x unified',
+                height=400
+            )
+            
+        except Exception as e:
+            print(f"Error in VaR chart: {e}")
+            return go.Figure().add_annotation(
+                text=f"Error loading VaR data: {str(e)}",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=16, color="red")
+            )
     
     return fig
 
 # Callback for drawdown chart
 @app.callback(
     Output("drawdown-chart", "figure"),
-    [Input("tabs", "active_tab")]
+    [Input("tabs", "active_tab"),
+     Input("risk-portfolio-selector", "value")],
+    prevent_initial_call=True
 )
-def update_drawdown_chart(active_tab):
-    """Update drawdown analysis chart."""
+def update_drawdown_chart(active_tab, selected_portfolios):
+    """Update drawdown analysis chart using real portfolio data."""
     if active_tab != "risk-tab":
         return go.Figure()
     
-    # Generate sample drawdown data
-    dates = pd.date_range(start='2023-01-01', end='2024-01-01', freq='D')
-    np.random.seed(42)
-    
-    # Generate realistic drawdown data
-    returns = np.random.normal(0.0005, 0.02, len(dates))
-    cumulative = (1 + returns).cumprod()
-    running_max = cumulative.expanding().max()
-    drawdown = (cumulative - running_max) / running_max
+    if not selected_portfolios or len(selected_portfolios) == 0:
+        return go.Figure().add_annotation(
+            text="Please select portfolios to analyze drawdown",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=16, color="gray")
+        )
     
     fig = go.Figure()
     
-    fig.add_trace(go.Scatter(
-        x=dates, y=drawdown,
-        mode='lines',
-        name='Drawdown',
-        line=dict(color='red', width=2),
-        fill='tozeroy'
-    ))
-    
-    # Add zero line
-    fig.add_hline(y=0, line_dash="dash", line_color="gray")
-    
-    fig.update_layout(
-        title="Portfolio Drawdown Analysis",
-        xaxis_title="Date",
-        yaxis_title="Drawdown",
-        yaxis=dict(tickformat='.1%'),
-        hovermode='x unified'
-    )
+    if DATABASE_AVAILABLE and PORTFOLIO_SERVICE:
+        try:
+            db_portfolios = PORTFOLIO_SERVICE.get_all_portfolios()
+            
+            # Filter selected portfolios
+            portfolios_to_analyze = []
+            for p in db_portfolios:
+                if p['name'] in selected_portfolios:
+                    portfolios_to_analyze.append(p)
+            
+            if not portfolios_to_analyze:
+                return go.Figure().add_annotation(
+                    text="No valid portfolios selected",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5, showarrow=False,
+                    font=dict(size=16, color="gray")
+                )
+            
+            # Fetch missing stock data for selected portfolios
+            fetch_missing_stock_data_for_portfolios(portfolios_to_analyze)
+            
+            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
+            
+            for i, portfolio in enumerate(portfolios_to_analyze):
+                try:
+                    # Calculate portfolio analytics
+                    end_date = datetime.now().strftime('%Y-%m-%d')
+                    start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                    
+                    analytics = PORTFOLIO_SERVICE.calculate_portfolio_analytics(
+                        symbols=portfolio['symbols'],
+                        weights=portfolio['weights'],
+                        start_date=start_date,
+                        end_date=end_date
+                    )
+                    
+                    if analytics and 'returns' in analytics:
+                        returns = analytics['returns']
+                        
+                        # Ensure returns is a pandas Series
+                        if not isinstance(returns, pd.Series):
+                            returns = pd.Series(returns)
+                        
+                        # Calculate drawdown
+                        cumulative = (1 + returns).cumprod()
+                        running_max = cumulative.expanding().max()
+                        drawdown = (cumulative - running_max) / running_max
+                        
+                        color = colors[i % len(colors)]
+                        
+                        # Add drawdown trace
+                        fig.add_trace(go.Scatter(
+                            x=returns.index, y=drawdown,
+                            mode='lines',
+                            name=f'{portfolio["name"]} - Drawdown',
+                            line=dict(color=color, width=2),
+                            fill='tozeroy'
+                        ))
+                        
+                except Exception as e:
+                    print(f"Error calculating drawdown for {portfolio['name']}: {e}")
+                    continue
+            
+            # Add zero line
+            fig.add_hline(y=0, line_dash="dash", line_color="gray")
+            
+            fig.update_layout(
+                title="Portfolio Drawdown Analysis (Real Data)",
+                xaxis_title="Date",
+                yaxis_title="Drawdown",
+                yaxis=dict(tickformat='.1%'),
+                hovermode='x unified',
+                height=400
+            )
+            
+        except Exception as e:
+            print(f"Error in drawdown chart: {e}")
+            return go.Figure().add_annotation(
+                text=f"Error loading drawdown data: {str(e)}",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=16, color="red")
+            )
     
     return fig
 
